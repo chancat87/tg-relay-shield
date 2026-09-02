@@ -1,0 +1,16 @@
+# Cloudflare Wrangler
+.wrangler/
+.dev.vars
+
+# Dependencies
+node_modules/
+package-lock.json
+
+# Logs & Environment
+*.log
+.env
+.env.*
+
+# OS
+.DS_Store
+Thumbs.db

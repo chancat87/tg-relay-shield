@@ -1,0 +1,24 @@
+{
+  "name": "tg-relay-shield",
+  "version": "2.3.0",
+  "description": "High-performance Telegram Relay & Anti-Spam Bot deployed serverless on Cloudflare Workers",
+  "main": "worker.js",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail"
+  },
+  "keywords": [
+    "telegram",
+    "telegram-bot",
+    "cloudflare-workers",
+    "anti-spam",
+    "serverless",
+    "relay-bot"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "wrangler": "^3.100.0"
+  }
+}

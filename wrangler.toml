@@ -1,0 +1,19 @@
+name = "tg-relay-shield"
+main = "worker.js"
+compatibility_date = "2024-01-01"
+
+# KV 数据库绑定 (变量名必须为 nfd)
+# 部署前请使用 wrangler kv:namespace create nfd 获取 id 并替换下方占位符
+[[kv_namespaces]]
+binding = "nfd"
+id = "YOUR_KV_NAMESPACE_ID"
+# preview_id = "YOUR_KV_PREVIEW_ID"
+
+# 环境变量配置 (也可在 Cloudflare Dashboard 后台手动添加)
+[vars]
+# BOT_TOKEN = "123456789:AAH..."
+# BOT_SECRET = "my_secure_secret_token_123"
+# ADMIN_UID = "987654321"
+# VERIFIED_TTL_SECONDS = "10800"
+# RATE_LIMIT_MESSAGE = "45"
+# RATE_LIMIT_WINDOW_SECONDS = "60"
