@@ -261,11 +261,28 @@ async function testStartAndReverify() {
   await env.nfd.put(`verify:${guestChatId}`, JSON.stringify({ verified: true, verifiedAt: now }));
   await env.nfd.put(`notify-cd:${guestChatId}`, '1');
 
-  // 1. 已验证访客发送 /start：告知已验证，彻底移除常驻重测按键，从源头切断脚本攻击面
+  // 1. 已验证访客发送 /start：首次响应告知处于有效期
   await bot.onMessage({ chat: { id: guestChatId }, from: { id: guestChatId, language_code: 'zh' }, text: '/start' });
   let lastMsg = sentMessages[sentMessages.length - 1];
   assert(lastMsg.text.includes('安全验证有效期内'), '必须提示已处于安全验证有效期内');
   assert(!lastMsg.reply_markup, '生产环境安全收敛：已验证访客主界面严禁提供常驻重新验证按键');
+
+  // 1.1 菜单防刷熔断：3 小时内重复点击 /start，必须直接静默，绝不重复发信！
+  const sentCountBeforeSpamStart = sentMessages.length;
+  await bot.onMessage({ chat: { id: guestChatId }, from: { id: guestChatId, language_code: 'zh' }, text: '/start' });
+  await bot.onMessage({ chat: { id: guestChatId }, from: { id: guestChatId, language_code: 'zh' }, text: '/start' });
+  assert.strictEqual(sentMessages.length, sentCountBeforeSpamStart, '3 小时会话期内重复点击 /start 必须完全熔断静默');
+
+  // 1.2 访客点击 /about：首次响应
+  await bot.onMessage({ chat: { id: guestChatId }, from: { id: guestChatId, language_code: 'zh' }, text: '/about' });
+  const aboutMsg = sentMessages[sentMessages.length - 1];
+  assert(aboutMsg.text.includes('关于此机器人'), '首次点击 /about 正常回复内容');
+
+  // 1.3 菜单防刷熔断：3 小时内重复点击 /about，必须直接静默，零发信零写 KV！
+  const sentCountBeforeSpamAbout = sentMessages.length;
+  await bot.onMessage({ chat: { id: guestChatId }, from: { id: guestChatId, language_code: 'zh' }, text: '/about' });
+  await bot.onMessage({ chat: { id: guestChatId }, from: { id: guestChatId, language_code: 'zh' }, text: '/about' });
+  assert.strictEqual(sentMessages.length, sentCountBeforeSpamAbout, '3 小时会话期内重复点击 /about 必须完全熔断静默');
 
   // 2. 访客发送 /reset：彻底废除该命令，系统绝不再重置会话、绝不再出题，仅作为普通文本正常转发！
   const fwdCountBefore = forwardedMessages.length;
@@ -455,7 +472,7 @@ async function main() {
   await testKeywordFiltering();
   await testMenuSimplification();
   await testRateLimitingAndQuotaProtection();
-  console.log('\n🌟 ALL 11 PRODUCTION TEST SUITES PASSED PERFECTLY (v3.3.1-Shield)!');
+  console.log('\n🌟 ALL 11 PRODUCTION TEST SUITES PASSED PERFECTLY (v3.4.0-Shield)!');
 }
 
 main().catch(err => {

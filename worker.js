@@ -41,7 +41,7 @@ function getIntEnv(env, name, def, fallbackName = null) {
   return Number.isFinite(v) && v > 0 ? v : def;
 }
 
-const BOT_VERSION = '3.3.1-Shield';
+const BOT_VERSION = '3.4.0-Shield';
 
 function getBeijingTimeStr() {
   const d = new Date(Date.now() + 8 * 3600 * 1000);
@@ -383,6 +383,14 @@ class BotCore {
           `• <b>系统健康状态</b>: 运转良好 ✅`;
         await this.api('sendMessage', { chat_id: chatId, text: info, parse_mode: 'HTML' });
       } else {
+        // 访客菜单熔断保护：3 小时内仅响应 1 次正常回复，重复点击直接熔断静默，彻底杜绝恶人点击玩弄
+        const aboutLockKey = `cmd-lock:about:${chatId}`;
+        const hasClickedAbout = await this.kv.get(aboutLockKey);
+        if (hasClickedAbout) {
+          // 已在当前 3 小时周期内触发过，直接熔断静默，零发信零写 KV
+          return;
+        }
+        await this.kv.put(aboutLockKey, '1', { expirationTtl: this.verifiedTtlSeconds });
         await this.api('sendMessage', { chat_id: chatId, text: t(lang, 'guestAbout'), parse_mode: 'HTML' });
       }
       return;
@@ -409,7 +417,14 @@ class BotCore {
         // 检查用户是否已验证过
         const isVerified = vstate && vstate.verified && (Date.now() - vstate.verifiedAt < this.verifiedTtlSeconds * 1000);
         if (isVerified) {
-          // 生产环境安全加固：已验证访客直接提示正常沟通，不再在主界面暴露常驻重新验证按钮，从根源杜绝恶意脚本刷题
+          // 访客菜单熔断保护：已验证访客在 3 小时有效期内仅响应 1 次，重复点击直接熔断静默，彻底杜绝恶人点击玩弄
+          const startLockKey = `cmd-lock:start:${chatId}`;
+          const hasClickedStart = await this.kv.get(startLockKey);
+          if (hasClickedStart) {
+            // 已在当前 3 小时周期内触发过，直接熔断静默，零发信零写 KV
+            return;
+          }
+          await this.kv.put(startLockKey, '1', { expirationTtl: this.verifiedTtlSeconds });
           await this.api('sendMessage', {
             chat_id: chatId,
             text: t(lang, 'guestVerifiedStart')
@@ -417,7 +432,13 @@ class BotCore {
           return;
         }
 
-        // 未验证：初始化会话并立即出题
+        // 未验证：初始化会话并立即出题（若已有活跃题目，防止重复出题）
+        const hasActiveQuestion = vstate && !vstate.verified && vstate.exp && Date.now() < vstate.exp;
+        if (hasActiveQuestion) {
+          await this.api('sendMessage', { chat_id: chatId, text: t(lang, 'verifyWaitingHint') });
+          return;
+        }
+
         const newSessionId = (sess && sess.sid) || Math.random().toString(36).slice(2, 10);
         if (!sess) {
           await this.kv.put(`session:${chatId}`, JSON.stringify({ sid: newSessionId, at: Date.now() }), { expirationTtl: 30 * 86400 });
@@ -480,6 +501,8 @@ class BotCore {
       await this.kv.delete(`block:${targetUid}`);
       await this.kv.delete(`verify:${targetUid}`);
       await this.kv.delete(`notify-cd:${targetUid}`);
+      await this.kv.delete(`cmd-lock:about:${targetUid}`);
+      await this.kv.delete(`cmd-lock:start:${targetUid}`);
       await this.api('sendMessage', { chat_id: adminChatId, text: `✅ 用户 \`${targetUid}\` 已解除屏蔽并清空惩罚状态。`, parse_mode: 'Markdown' });
       return;
     }
