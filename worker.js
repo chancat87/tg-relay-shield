@@ -458,11 +458,12 @@ class BotCore {
     const isBlocked = await this.kv.get(`block:${chatId}`);
     if (isBlocked) return;
 
-    // 2. 会话检查
-    const sess = await this.kv.get(`session:${chatId}`, { type: 'json' }).catch(() => null);
+    // 2. 会话检查 (不存在则无感初始化)
+    let sess = await this.kv.get(`session:${chatId}`, { type: 'json' }).catch(() => null);
     if (!sess) {
-      await this.api('sendMessage', { chat_id: chatId, text: getPrompt(lang, PROMPTS.sessionExpired) });
-      return;
+      const newSessionId = Math.random().toString(36).slice(2, 10);
+      sess = { sid: newSessionId, at: Date.now() };
+      await this.kv.put(`session:${chatId}`, JSON.stringify(sess), { expirationTtl: 30 * 86400 });
     }
 
     // 3. 熔断与验证检查
@@ -478,7 +479,13 @@ class BotCore {
 
     const isVerified = vstate && vstate.verified && (Date.now() - vstate.verifiedAt < this.verifiedTtlSeconds * 1000);
     if (!isVerified) {
-      await this.api('sendMessage', { chat_id: chatId, text: getPrompt(lang, PROMPTS.verifyButtonsPrompt) });
+      const hasActiveQuestion = vstate && !vstate.verified && vstate.exp && Date.now() < vstate.exp;
+      if (hasActiveQuestion) {
+        await this.api('sendMessage', { chat_id: chatId, text: getPrompt(lang, PROMPTS.verifyButtonsPrompt) });
+      } else {
+        // 验证过期或题目过期：自动重新生成并发送新的算术验证题及按钮
+        await this.issueQuestion(chatId, lang, sess.sid, vstate?.failCount || 0);
+      }
       return;
     }
 
@@ -556,11 +563,52 @@ class BotCore {
     }
 
     if (!vstate || !sess || vstate.questionId !== qid || Date.now() > vstate.exp) {
+      // 题目已过期或失效：自动生成新题目并就地刷新按钮，免去手动发送 /start 的繁琐操作
+      const activeSess = sess || { sid: Math.random().toString(36).slice(2, 10), at: Date.now() };
+      if (!sess) {
+        await this.kv.put(`session:${userId}`, JSON.stringify(activeSess), { expirationTtl: 30 * 86400 });
+      }
+
+      const newQ = generateDynamicQuestion(lang);
+      const newState = {
+        sessionId: activeSess.sid,
+        questionId: newQ.id,
+        correctIndex: newQ.correctIndex,
+        exp: Date.now() + 10 * 60 * 1000,
+        verified: false,
+        failCount: vstate?.failCount || 0,
+        lockedUntil: 0
+      };
+      await this.kv.put(`verify:${userId}`, JSON.stringify(newState), { expirationTtl: this.verifiedTtlSeconds });
+
       await this.api('answerCallbackQuery', {
         callback_query_id: cbq.id,
-        text: getPrompt(lang, PROMPTS.verifyExpired),
-        show_alert: true
+        text: '⚠️ 上道题目已过期，已为您生成新题目！'
       });
+
+      const keyboard = [];
+      for (let i = 0; i < newQ.options.length; i += 2) {
+        const row = [{ text: newQ.options[i], callback_data: `v:${newQ.id}:${i}` }];
+        if (i + 1 < newQ.options.length) {
+          row.push({ text: newQ.options[i + 1], callback_data: `v:${newQ.id}:${i + 1}` });
+        }
+        keyboard.push(row);
+      }
+
+      if (messageId) {
+        await this.api('editMessageText', {
+          chat_id: userId,
+          message_id: messageId,
+          text: `⚠️ 题目已过期，已为您重新出题：\n\n${getPrompt(lang, PROMPTS.verifyRequired)}${newQ.question}${getPrompt(lang, PROMPTS.verifyPick)}`,
+          reply_markup: { inline_keyboard: keyboard }
+        });
+      } else {
+        await this.api('sendMessage', {
+          chat_id: userId,
+          text: `${getPrompt(lang, PROMPTS.verifyRequired)}${newQ.question}${getPrompt(lang, PROMPTS.verifyPick)}`,
+          reply_markup: { inline_keyboard: keyboard }
+        });
+      }
       return;
     }
 
@@ -689,6 +737,8 @@ export default {
     return handleHttp(request, env, ctx);
   }
 };
+
+export { BotCore };
 
 if (typeof addEventListener === 'function') {
   addEventListener('fetch', event => {

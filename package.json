@@ -3,7 +3,9 @@
   "version": "2.3.0",
   "description": "High-performance Telegram Relay & Anti-Spam Bot deployed serverless on Cloudflare Workers",
   "main": "worker.js",
+  "type": "module",
   "scripts": {
+    "test": "node test_suite.mjs",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "tail": "wrangler tail"
