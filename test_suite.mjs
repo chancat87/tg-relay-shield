@@ -127,16 +127,16 @@ async function testShieldDualModeSwitching() {
   console.log('✓ Passed: /kqfy 双模热切换极简顺畅，零多余认知负担。');
 }
 
-// --- Test 4: 终极模式 Cloudflare 网页盾牌与 HMAC 签名验证 ---
+// --- Test 4: 终极模式 Cloudflare 网页盾牌与 Telegram Mini App 票据机制 ---
 async function testUltimateModeWebShield() {
-  console.log('--- Test 4: 终极模式 Cloudflare 网页盾牌与 HMAC 防篡改 ---');
+  console.log('--- Test 4: 终极模式 Cloudflare 网页盾牌与 Telegram Mini App 票据机制 ---');
   const { bot, env, sentMessages } = await createTestBot();
   const guestChatId = 77777;
 
   // 设置为终极模式 2
   await env.nfd.put('config:shield_level', '2');
 
-  // 访客发信，应该收到网页验证链接按钮
+  // 访客发信，应该收到 Telegram Mini App 网页验证按键
   await bot.handleGuestMessage({
     chat: { id: guestChatId },
     from: { id: guestChatId, language_code: 'zh' },
@@ -146,21 +146,18 @@ async function testUltimateModeWebShield() {
 
   const verifyMsg = sentMessages.find(m => m.chat_id === guestChatId && m.reply_markup?.inline_keyboard);
   assert(verifyMsg, '终极模式下访客必须收到网页验证按钮');
-  const urlBtn = verifyMsg.reply_markup.inline_keyboard[0][0];
-  assert(urlBtn.url.includes('/verify?uid=77777'), '按键链接必须指向 /verify');
+  const webAppBtn = verifyMsg.reply_markup.inline_keyboard[0][0];
+  assert(webAppBtn.web_app && webAppBtn.web_app.url, '必须采用 Telegram Mini App (web_app) 按钮，杜绝外部跳转弹窗');
+  assert(webAppBtn.web_app.url.includes('/verify?t=tk_'), '按键链接必须包含不透明一次性票据 ?t=tk_，严禁明文暴露 uid');
+  assert(!webAppBtn.web_app.url.includes('uid='), 'URL 严禁包含 uid 明文');
 
-  // 校验 HMAC 签名防伪造
-  const urlObj = new URL(urlBtn.url);
-  const uid = urlObj.searchParams.get('uid');
-  const exp = parseInt(urlObj.searchParams.get('exp'), 10);
-  const sig = urlObj.searchParams.get('sig');
+  // 校验 KV 中票据有效关联
+  const urlObj = new URL(webAppBtn.web_app.url);
+  const ticket = urlObj.searchParams.get('t');
+  const mappedUid = await env.nfd.get(`ticket:${ticket}`);
+  assert.strictEqual(mappedUid, String(guestChatId), '票据必须安全映射到访客 chatId');
 
-  const isValidSig = await verifyVerificationToken(uid, exp, sig, bot.secret);
-  assert(isValidSig, 'HMAC 签名必须校验通过');
-
-  const isTamperedSig = await verifyVerificationToken('999999_fake', exp, sig, bot.secret);
-  assert(!isTamperedSig, '篡改 UID 的非法请求必须被拒绝');
-  console.log('✓ Passed: 终极模式网页验证链接与防篡改签名机制运转无误。');
+  console.log('✓ Passed: 终极模式 Telegram Mini App 与票据脱敏机制运转无误。');
 }
 
 // --- Test 5: 正常用户交流文章/博客链接零误伤通过 ---
@@ -214,6 +211,33 @@ async function testBilingualSwitch() {
   console.log('✓ Passed: 纯双语隔离无串味，一键切换秒级重绘。');
 }
 
+// --- Test 7: 已验证状态下 /start 友好提示与 /reset 重新获取验证 ---
+async function testStartAndReverify() {
+  console.log('--- Test 7: 已验证状态下 /start 友好提示与 /reset 重新获取验证 ---');
+  const { bot, env, sentMessages } = await createTestBot();
+  const guestChatId = 66666;
+  const now = Date.now();
+
+  // 模拟用户刚刚验证通过
+  await env.nfd.put(`session:${guestChatId}`, JSON.stringify({ sid: 'sess_66', at: now }));
+  await env.nfd.put(`verify:${guestChatId}`, JSON.stringify({ verified: true, verifiedAt: now }));
+
+  // 1. 已验证访客发送 /start：不应抹除验证重新强制弹题，而是告知已验证并附带重测按钮
+  await bot.onMessage({ chat: { id: guestChatId }, from: { id: guestChatId, language_code: 'zh' }, text: '/start' }, 'bot.example.com');
+  let lastMsg = sentMessages[sentMessages.length - 1];
+  assert(lastMsg.text.includes('已通过人机安全验证'), '必须提示已验证');
+  assert(lastMsg.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data === 'force_reverify', '必须提供重新验证按键供测试');
+
+  // 2. 访客发送 /reset 或点击重新出题：会话清空并立即重新出题
+  await bot.onMessage({ chat: { id: guestChatId }, from: { id: guestChatId, language_code: 'zh' }, text: '/reset' }, 'bot.example.com');
+  const reverifyMsg = sentMessages[sentMessages.length - 1];
+  assert(reverifyMsg.reply_markup?.inline_keyboard, '重置后必须立即生成新验证');
+  const vstate = await env.nfd.get(`verify:${guestChatId}`, { type: 'json' });
+  assert(!vstate.verified, '验证状态必须被重置为未通过');
+
+  console.log('✓ Passed: /start 已验证提示与 /reset 重新验证逻辑严密流畅。');
+}
+
 async function main() {
   await testQuoteReplyContext();
   await testEmojiDynamicQuestion();
@@ -221,7 +245,8 @@ async function main() {
   await testUltimateModeWebShield();
   await testNormalLinkNotBlocked();
   await testBilingualSwitch();
-  console.log('\n🌟 ALL 6 PRODUCTION TEST SUITES PASSED PERFECTLY (v2.5.0)!');
+  await testStartAndReverify();
+  console.log('\n🌟 ALL 7 PRODUCTION TEST SUITES PASSED PERFECTLY (v2.5.0)!');
 }
 
 main().catch(err => {

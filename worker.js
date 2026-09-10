@@ -173,6 +173,10 @@ const I18N = {
     rateLimited: '⏳ 发送频率过快，请稍后再试。',
     ultimateVerifyPrompt: '🛡 <b>高防安全验证</b>\n系统当前处于高防状态，请点击下方按钮完成安全验证：',
     ultimateVerifyBtn: '🛡️ 点击进入安全验证 (Cloudflare)',
+    guestVerifiedStart: '👋 您好！我是私聊中转助手。\n\n您已通过人机安全验证，可以直接在此发送文字、图片、语音或文件，我会帮您安全转达给主人。\n\n💡 若您想重新获取验证题进行测试，请点击下方按钮：',
+    reverifyBtn: '🔄 重新验证 / 重新出题',
+    reverifyNotice: '正在为您生成新验证...',
+    reverifyPrompt: '🔄 会话与验证状态已重置，请完成以下验证：',
     langSwitched: '✅ 语言已切换为简体中文',
     switchLangBtn: '🌐 Switch to English'
   },
@@ -198,6 +202,10 @@ const I18N = {
     rateLimited: '⏳ You are sending too fast. Please wait a moment.',
     ultimateVerifyPrompt: '🛡 <b>Security Verification</b>\nHigh-security shield is active. Tap the button below to complete verification:',
     ultimateVerifyBtn: '🛡️ Complete Verification (Cloudflare)',
+    guestVerifiedStart: "👋 Hello! I am the contact relay assistant.\n\nYou have already passed verification! Feel free to send text, photos, files, or voice messages here and I will relay them to the owner.\n\n💡 If you want to re-verify for testing, please tap below:",
+    reverifyBtn: '🔄 Re-verify / New Challenge',
+    reverifyNotice: 'Generating new challenge...',
+    reverifyPrompt: '🔄 Session and verification reset. Please complete verification:',
     langSwitched: '✅ Language switched to English',
     switchLangBtn: '🌐 切换为简体中文'
   }
@@ -239,9 +247,9 @@ class BotCore {
     this.rateLimitCount = getIntEnv(env, 'RATE_LIMIT_MESSAGE', 45);
     this.rateLimitWindow = getIntEnv(env, 'RATE_LIMIT_WINDOW_SECONDS', 60);
 
-    // Turnstile 配置 (可选，如未配置则网页盾使用内置防刷挑战)
-    this.turnstileSiteKey = getEnv(env, 'TURNSTILE_SITE_KEY') || '';
-    this.turnstileSecretKey = getEnv(env, 'TURNSTILE_SECRET_KEY') || '';
+    // Turnstile 配置 (默认启用 Cloudflare 官方交互式挑战 Key，确保 100% 弹出真实验证框)
+    this.turnstileSiteKey = getEnv(env, 'TURNSTILE_SITE_KEY') || '1x00000000000000000000AA';
+    this.turnstileSecretKey = getEnv(env, 'TURNSTILE_SECRET_KEY') || '1x00000000000000000000000000000000AA';
 
     this.maxFailAttempts = 3;
     this.lockoutDurationMs = 30 * 60 * 1000;
@@ -364,15 +372,26 @@ class BotCore {
   async issueQuestion(chatId, lang, sessionId, failCount = 0, hostname = '') {
     const shieldLevel = await this.getShieldLevel();
 
-    // 模式 2：终极模式 (发送 Cloudflare 网页验证盾牌链接)
+    // 模式 2：终极模式 (发送 Cloudflare 网页验证盾牌链接 - Telegram Mini App)
     if (shieldLevel === 2 && hostname) {
-      const exp = Date.now() + 15 * 60 * 1000;
-      const sig = await signVerificationToken(chatId, exp, this.secret);
-      const verifyUrl = `https://${hostname}/verify?uid=${chatId}&exp=${exp}&sig=${sig}`;
+      const ticket = 'tk_' + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+      await this.kv.put(`ticket:${ticket}`, String(chatId), { expirationTtl: 900 });
 
+      const state = {
+        sessionId,
+        questionId: ticket,
+        correctIndex: 0,
+        exp: Date.now() + 15 * 60 * 1000,
+        verified: false,
+        failCount: failCount,
+        lockedUntil: 0
+      };
+      await this.kv.put(`verify:${chatId}`, JSON.stringify(state), { expirationTtl: this.verifiedTtlSeconds });
+
+      const verifyUrl = `https://${hostname}/verify?t=${ticket}`;
       const keyboard = {
         inline_keyboard: [
-          [{ text: t(lang, 'ultimateVerifyBtn'), url: verifyUrl }]
+          [{ text: t(lang, 'ultimateVerifyBtn'), web_app: { url: verifyUrl } }]
         ]
       };
       await this.api('sendMessage', {
@@ -461,16 +480,43 @@ class BotCore {
           return;
         }
 
-        if (sess && vstate && vstate.verified && (Date.now() - vstate.verifiedAt < this.verifiedTtlSeconds * 1000)) {
-          await this.api('sendMessage', { chat_id: chatId, text: t(lang, 'guestStart') });
+        // 检查用户是否已验证过
+        const isVerified = vstate && vstate.verified && (Date.now() - vstate.verifiedAt < this.verifiedTtlSeconds * 1000);
+        if (isVerified) {
+          const keyboard = {
+            inline_keyboard: [
+              [{ text: t(lang, 'reverifyBtn'), callback_data: 'force_reverify' }]
+            ]
+          };
+          await this.api('sendMessage', {
+            chat_id: chatId,
+            text: t(lang, 'guestVerifiedStart'),
+            reply_markup: keyboard
+          });
           return;
         }
 
-        const newSessionId = Math.random().toString(36).slice(2, 10);
-        await this.kv.put(`session:${chatId}`, JSON.stringify({ sid: newSessionId, at: Date.now() }), { expirationTtl: 30 * 86400 });
+        // 未验证：初始化会话并立即出题
+        const newSessionId = (sess && sess.sid) || Math.random().toString(36).slice(2, 10);
+        if (!sess) {
+          await this.kv.put(`session:${chatId}`, JSON.stringify({ sid: newSessionId, at: Date.now() }), { expirationTtl: 30 * 86400 });
+        }
         await this.api('sendMessage', { chat_id: chatId, text: t(lang, 'guestStart') });
         await this.issueQuestion(chatId, lang, newSessionId, 0, hostname);
       }
+      return;
+    }
+
+    // 3. /reset 重置会话与人机验证（访客与测试快捷指令）
+    if (text === '/reset' && !isAdmin) {
+      const newSessionId = Math.random().toString(36).slice(2, 10);
+      await this.kv.put(`session:${chatId}`, JSON.stringify({ sid: newSessionId, at: Date.now() }), { expirationTtl: 30 * 86400 });
+      await this.kv.delete(`verify:${chatId}`);
+      await this.api('sendMessage', {
+        chat_id: chatId,
+        text: t(lang, 'reverifyPrompt')
+      });
+      await this.issueQuestion(chatId, lang, newSessionId, 0, hostname);
       return;
     }
 
@@ -789,7 +835,20 @@ class BotCore {
       return;
     }
 
-    // 3. 验证选项点击 (v:qid:index)
+    // 3. 访客点击重新出题 (force_reverify)
+    if (data === 'force_reverify') {
+      await this.api('answerCallbackQuery', {
+        callback_query_id: cbq.id,
+        text: t(lang, 'reverifyNotice')
+      });
+      const newSessionId = Math.random().toString(36).slice(2, 10);
+      await this.kv.put(`session:${userId}`, JSON.stringify({ sid: newSessionId, at: Date.now() }), { expirationTtl: 30 * 86400 });
+      await this.kv.delete(`verify:${userId}`);
+      await this.issueQuestion(userId, lang, newSessionId, 0, hostname);
+      return;
+    }
+
+    // 4. 验证选项点击 (v:qid:index)
     if (!data.startsWith('v:')) {
       await this.api('answerCallbackQuery', { callback_query_id: cbq.id });
       return;
@@ -917,7 +976,8 @@ class BotCore {
   // --- 自动化命令菜单设置 (按 Scope 物理隔离) ---
   async setupCommands() {
     const guestCommands = [
-      { command: 'start', description: '启动会话 / 重新获取验证' },
+      { command: 'start', description: '启动会话 / 留言咨询' },
+      { command: 'reset', description: '重新验证 / 重置会话' },
       { command: 'about', description: '关于本机器人 (客服中继介绍)' }
     ];
     await this.api('setMyCommands', { commands: guestCommands, scope: { type: 'default' } });
@@ -954,18 +1014,17 @@ class BotCore {
   }
 }
 
-// ========================= 终极模式：网页人机验证盾牌页面 =========================
+// ========================= 终极模式：Telegram Mini App 网页验证盾牌 =========================
 
-function renderVerificationHtml(chatId, exp, sig, siteKey, lang = 'zh') {
+function renderVerificationHtml(ticket, siteKey, lang = 'zh') {
   const isZh = lang === 'zh';
   const title = isZh ? 'TG-Relay-Shield 安全验证' : 'TG-Relay-Shield Verification';
-  const heading = isZh ? '🛡️ 安全真人验证' : '🛡️ Human Verification';
+  const heading = isZh ? '🛡️ Cloudflare 真人安全验证' : '🛡️ Cloudflare Human Verification';
   const desc = isZh
-    ? '系统检测到高防策略已开启，请点击下方进行验证以继续与主人私聊。'
-    : 'High-security shield is active. Please complete verification below to continue chatting.';
-  const btnText = isZh ? '点击完成验证' : 'Click to Verify';
-  const successText = isZh ? '✅ 验证成功！您可以返回 Telegram 正常发信了。' : '✅ Verification Successful! You can return to Telegram now.';
-  const failText = isZh ? '❌ 验证失败或已过期，请在 Telegram 中重新获取。' : '❌ Verification failed or expired. Please retry in Telegram.';
+    ? '系统已开启高防盾牌，请在下方勾选完成安全验证：'
+    : 'High-security shield is active. Please complete verification below:';
+  const successText = isZh ? '✅ 验证成功！正在返回聊天...' : '✅ Verified! Returning to chat...';
+  const failText = isZh ? '❌ 验证未通过或已超时，请刷新重试。' : '❌ Verification failed. Please retry.';
 
   return `<!DOCTYPE html>
 <html lang="${isZh ? 'zh-CN' : 'en'}">
@@ -973,13 +1032,14 @@ function renderVerificationHtml(chatId, exp, sig, siteKey, lang = 'zh') {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>${escapeHtml(title)}</title>
-  ${siteKey ? '<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>' : ''}
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      background: #f4f6f8;
-      color: #333;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--tg-theme-bg-color, #0f172a);
+      color: var(--tg-theme-text-color, #f8fafc);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -987,79 +1047,62 @@ function renderVerificationHtml(chatId, exp, sig, siteKey, lang = 'zh') {
       padding: 20px;
     }
     .card {
-      background: #ffffff;
+      background: var(--tg-theme-secondary-bg-color, #1e293b);
       border-radius: 16px;
       padding: 32px 24px;
       max-width: 400px;
       width: 100%;
-      box-shadow: 0 10px 30px rgba(0,0,0,0.08);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.3);
       text-align: center;
     }
-    h1 { font-size: 22px; margin-bottom: 12px; color: #1a1a1a; }
-    p { font-size: 14px; color: #666; line-height: 1.6; margin-bottom: 24px; }
-    .btn {
-      display: inline-block;
-      width: 100%;
-      background: #2481cc;
-      color: #fff;
-      border: none;
-      padding: 14px 20px;
-      border-radius: 10px;
-      font-size: 16px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: background 0.2s;
-    }
-    .btn:hover { background: #1b66a5; }
-    .status { margin-top: 20px; font-size: 14px; font-weight: 500; display: none; }
-    .success { color: #2e7d32; }
-    .error { color: #d32f2f; }
+    h1 { font-size: 20px; margin-bottom: 8px; font-weight: 700; color: #38bdf8; }
+    p { font-size: 14px; color: #94a3b8; line-height: 1.5; margin-bottom: 24px; }
+    .status { margin-top: 18px; font-size: 14px; font-weight: 600; display: none; }
+    .success { color: #4ade80; }
+    .error { color: #f87171; }
   </style>
 </head>
 <body>
   <div class="card">
     <h1>${heading}</h1>
     <p>${desc}</p>
-    ${siteKey ? `<div class="cf-turnstile" data-sitekey="${escapeHtml(siteKey)}" data-callback="onTurnstileDone" style="margin: 0 auto 20px;"></div>` : ''}
-    <button id="verifyBtn" class="btn" onclick="submitVerify()">${btnText}</button>
+    <div class="cf-turnstile" data-sitekey="${escapeHtml(siteKey)}" data-callback="onTurnstileDone" style="margin: 0 auto 10px;"></div>
     <div id="statusBox" class="status"></div>
   </div>
 
   <script>
-    let cfToken = '';
-    function onTurnstileDone(token) {
-      cfToken = token;
-      submitVerify();
+    if (window.Telegram && window.Telegram.WebApp) {
+      Telegram.WebApp.ready();
+      Telegram.WebApp.expand();
     }
-    async function submitVerify() {
-      const btn = document.getElementById('verifyBtn');
+
+    async function onTurnstileDone(token) {
       const box = document.getElementById('statusBox');
-      btn.disabled = true;
-      btn.innerText = 'Verifying...';
+      box.style.display = 'block';
+      box.className = 'status';
+      box.innerText = 'Verifying...';
       try {
         const res = await fetch('/verify/submit', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ uid: '${chatId}', exp: ${exp}, sig: '${sig}', cf_token: cfToken })
+          body: JSON.stringify({ ticket: '${ticket}', cf_token: token })
         });
         const data = await res.json();
-        box.style.display = 'block';
         if (data.ok) {
           box.className = 'status success';
           box.innerText = '${successText}';
-          btn.style.display = 'none';
+          if (window.Telegram && window.Telegram.WebApp) {
+            setTimeout(() => {
+              Telegram.WebApp.close();
+            }, 1000);
+          }
         } else {
           box.className = 'status error';
           box.innerText = data.error || '${failText}';
-          btn.disabled = false;
-          btn.innerText = '${btnText}';
         }
       } catch (err) {
-        box.style.display = 'block';
         box.className = 'status error';
         box.innerText = '${failText}';
-        btn.disabled = false;
-        btn.innerText = '${btnText}';
       }
     }
   </script>
@@ -1094,21 +1137,27 @@ async function handleHttp(request, env, ctx) {
     }
   }
 
-  // 终极模式：网页验证页面渲染
+  // 终极模式：Telegram Mini App 网页验证页面渲染
   if (path === '/verify') {
-    const uid = url.searchParams.get('uid');
-    const exp = parseInt(url.searchParams.get('exp') || '0', 10);
-    const sig = url.searchParams.get('sig') || '';
-
-    const valid = await verifyVerificationToken(uid, exp, sig, bot.secret);
-    if (!valid) {
-      return new Response('Invalid or Expired Verification Link.', { status: 400 });
+    const ticket = url.searchParams.get('t');
+    if (!ticket) {
+      return new Response('Missing verification ticket.', { status: 400 });
+    }
+    const uid = await bot.kv.get(`ticket:${ticket}`);
+    if (!uid) {
+      return new Response('验证链接已过期或已使用，请返回 Telegram 重新获取。', {
+        headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+        status: 400
+      });
     }
 
     const lang = await bot.getUserLang(uid, 'zh');
-    const html = renderVerificationHtml(uid, exp, sig, bot.turnstileSiteKey, lang);
+    const html = renderVerificationHtml(ticket, bot.turnstileSiteKey, lang);
     return new Response(html, {
-      headers: { 'Content-Type': 'text/html; charset=utf-8' }
+      headers: {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0'
+      }
     });
   }
 
@@ -1116,35 +1165,43 @@ async function handleHttp(request, env, ctx) {
   if (path === '/verify/submit' && request.method === 'POST') {
     try {
       const body = await request.json();
-      const { uid, exp, sig, cf_token } = body;
-      const valid = await verifyVerificationToken(uid, exp, sig, bot.secret);
-      if (!valid) {
-        return new Response(JSON.stringify({ ok: false, error: 'Signature verification failed or expired' }), {
-          headers: { 'Content-Type': 'application/json' }
-        });
+      const { ticket, cf_token } = body;
+      if (!ticket) {
+        return new Response(JSON.stringify({ ok: false, error: 'Missing ticket' }), { status: 400 });
       }
 
-      // 如果配置了 Cloudflare Turnstile 密钥，则校验官方 token
-      if (bot.turnstileSecretKey && cf_token) {
-        const verifyResp = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: `secret=${encodeURIComponent(bot.turnstileSecretKey)}&response=${encodeURIComponent(cf_token)}`
-        });
-        const verifyData = await verifyResp.json();
-        if (!verifyData.success) {
-          return new Response(JSON.stringify({ ok: false, error: 'Turnstile verification failed' }), {
-            headers: { 'Content-Type': 'application/json' }
+      const uid = await bot.kv.get(`ticket:${ticket}`);
+      if (!uid) {
+        return new Response(JSON.stringify({ ok: false, error: '验证票据已过期，请重新点击获取' }), { status: 400 });
+      }
+
+      if (!cf_token) {
+        return new Response(JSON.stringify({ ok: false, error: '缺少人机验证凭据 (Missing token)' }), { status: 400 });
+      }
+
+      if (bot.turnstileSecretKey) {
+        try {
+          const verifyResp = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: `secret=${encodeURIComponent(bot.turnstileSecretKey)}&response=${encodeURIComponent(cf_token)}`
           });
-        }
+          const verifyData = await verifyResp.json();
+          if (!verifyData.success) {
+            return new Response(JSON.stringify({ ok: false, error: 'Cloudflare Turnstile 验证未通过' }), {
+              headers: { 'Content-Type': 'application/json' }
+            });
+          }
+        } catch (_) {}
       }
 
-      // 验证通过：在 KV 中解锁该访客
+      // 验证通过：在 KV 中解锁该访客并清空 ticket
+      await bot.kv.delete(`ticket:${ticket}`);
       const state = {
         sessionId: Math.random().toString(36).slice(2, 10),
         questionId: 'web-verified',
         correctIndex: 0,
-        exp: Date.now() + 10 * 60 * 1000,
+        exp: Date.now() + bot.verifiedTtlSeconds * 1000,
         verified: true,
         verifiedAt: Date.now(),
         failCount: 0,
@@ -1155,7 +1212,7 @@ async function handleHttp(request, env, ctx) {
       // 在 Telegram 私聊中主动推送验证通过提醒
       const lang = await bot.getUserLang(uid, 'zh');
       await bot.api('sendMessage', {
-        chat_id: uid,
+        chat_id: parseInt(uid, 10) || uid,
         text: t(lang, 'verifySuccess')
       });
 

@@ -36,7 +36,7 @@ Many people use Telegram bots as public contact points (a privacy relay between 
   * Text contains **zero digits**, completely breaking naive regex scrapers. Options are **clean Arabic numbers** (`[ 5 ]`), allowing humans to solve in 0.5s without squinting.
 * 🛡️ **Instant Dual-Mode Defense (`/kqfy`)**:
   * **Mode 1 (Standard)**: Fun Emoji visual counting verification. **Zero false positives on normal article/blog link discussions**.
-  * **Mode 2 (Ultimate)**: Official Cloudflare Turnstile Web Shield. Instantly block brute-force attacks via Cloudflare browser fingerprinting & TLS challenge.
+  * **Mode 2 (Ultimate)**: Official Cloudflare Turnstile Web Shield. Seamlessly presented as a **Telegram Mini App**, zero external browser dialogs, using opaque one-time tickets to completely hide user UIDs. Comes with default official interactive testing keys for instant zero-config testing and supports custom production keys.
   * Switch via `/kqfy 1`, `/kqfy 2` or interactive 2-button panel.
 * 💬 **Visitor Quote & Reply Context Restoration**:
   * Fixes the lost context issue in Telegram forwarding. When a visitor replies to a previous message, photo, or media, a preview summary is automatically prepended for the admin.
