@@ -31,13 +31,11 @@ Many people use Telegram bots as public contact points (a privacy relay between 
 ## ✨ Key Features
 
 * 🚀 **100% Serverless & Free**: No VPS or Docker required. Runs seamlessly within Cloudflare Workers' generous free tier.
-* 🍓 **Visual Emoji Arithmetic (Standard Mode)**:
+* 🍓 **Visual Emoji Arithmetic (Native Telegram Shield)**:
+  * 100% native Telegram inline interaction. **Zero external web redirects, zero browser popups, zero 3rd-party dependencies**, and immune to cross-region latency.
   * Dynamic math problems using 16 clean, universal emojis (e.g. `🍎🍎 + 🍎🍎🍎 = ?`).
   * Text contains **zero digits**, completely breaking naive regex scrapers. Options are **clean Arabic numbers** (`[ 5 ]`), allowing humans to solve in 0.5s without squinting.
-* 🛡️ **Instant Dual-Mode Defense (`/kqfy`)**:
-  * **Mode 1 (Standard)**: Fun Emoji visual counting verification. **Zero false positives on normal article/blog link discussions**.
-  * **Mode 2 (Ultimate)**: Official Cloudflare Turnstile Web Shield. Seamlessly presented as a **Telegram Mini App**, zero external browser dialogs, using opaque one-time tickets to completely hide user UIDs. Comes with default official interactive testing keys for instant zero-config testing and supports custom production keys.
-  * Switch via `/kqfy 1`, `/kqfy 2` or interactive 2-button panel.
+  * **Zero false positives on normal article/blog link discussions**.
 * 💬 **Visitor Quote & Reply Context Restoration**:
   * Fixes the lost context issue in Telegram forwarding. When a visitor replies to a previous message, photo, or media, a preview summary is automatically prepended for the admin.
 * ⚡ **3-Strike Lockout (Anti-Spam DDoS)**:
@@ -51,7 +49,7 @@ Many people use Telegram bots as public contact points (a privacy relay between 
 * 🔒 **Complete Admin Anonymity**:
   * Supports replying even if the visitor has enabled "Hide Account on Forwarding". Your real Telegram identity remains 100% private.
 * 🛠️ **Scope-Based Isolated Command Menus**:
-  * Configures separate command menus for visitors (`/start`, `/about`) and admins (`/kqfy`, `/block`, `/unblock`, `/addkw`, `/listkw`, `/help`, `/about`).
+  * Configures separate command menus for visitors (`/start`, `/reset`, `/about`) and admins (`/block`, `/unblock`, `/addkw`, `/delkw`, `/listkw`, `/help`, `/about`).
 
 ---
 
@@ -82,8 +80,6 @@ Many people use Telegram bots as public contact points (a privacy relay between 
      * `BOT_TOKEN`: Your bot token.
      * `ADMIN_UID`: Your Telegram numeric ID.
      * `BOT_SECRET`: Your random secret token.
-     * `TURNSTILE_SITE_KEY`: (Optional) Custom Cloudflare Turnstile Site Key for Mode 2.
-     * `TURNSTILE_SECRET_KEY`: (Optional) Custom Cloudflare Turnstile Secret Key for Mode 2.
    * Click **Save and Deploy**.
 
 4. **Activate Bot**:
@@ -93,20 +89,6 @@ Many people use Telegram bots as public contact points (a privacy relay between 
      ```
      *(Or use your custom domain: `https://bot.yourdomain.com/quick-setup`)*
    * Seeing `{"ok": true, "result": true, "description": "Webhook was set"}` means you are good to go!
-
----
-
-### 🛡️ Obtaining Cloudflare Turnstile Keys (100% Free, 1 Minute)
-If you enable **Mode 2 (Ultimate Shield)** and wish to use official custom keys without the test banner:
-1. Log in to the [Cloudflare Dashboard](https://dash.cloudflare.com/) and navigate to **Turnstile** on the left menu.
-2. Click **Add widget**:
-   * **Widget name**: e.g., `tg-relay-shield`
-   * **Domains**: Enter your Worker domain (e.g., `tg.aichi.de5.net`)
-   * **Widget Mode**: Select **Managed (Recommended)**
-3. Click **Create** to instantly generate:
-   * `Site Key`: Starting with `0x4AAAAAA...`
-   * `Secret Key`: Starting with `0x4AAAAAA...`
-4. Add them to your Worker's `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY` environment variables.
 
 ---
 
@@ -144,13 +126,13 @@ Execute these directly in your private chat with the bot:
 | Command | Usage | Description |
 | :--- | :--- | :--- |
 | **Reply to message** | Tap **Reply** on a forwarded message | Sends your reply directly to the guest (text, media, files) |
-| **`/kqfy`** | `/kqfy` or `/kqfy 1\|2` | **Dual-Mode Defense Hot-Switch**. Select Mode 1 (Standard Emoji) or Mode 2 (Ultimate Web Shield) |
 | **`/block`** | Reply to message OR `/block <uid>` | **Silent Shadowban**. Silently drops all future messages from this user |
 | **`/unblock`** | Reply to message OR `/unblock <uid>` | Unblocks the user and clears any lockout count |
 | **`/addkw <word>`** | `/addkw crypto` | Adds a local keyword filter |
+| **`/delkw <word>`** | `/delkw crypto` | Deletes a local keyword filter |
 | **`/listkw`** | `/listkw` | Lists all active local keyword filters |
 | **`/help`** | `/help` | Displays the admin help menu |
-| **`/about`** | `/about` | Displays system status, version, and active defense level |
+| **`/about`** | `/about` | Displays system status, version, and active defense engine |
 
 ---
 

@@ -1,4 +1,4 @@
-import { BotCore, generateDynamicQuestion, signVerificationToken, verifyVerificationToken } from './worker.js';
+import { BotCore, generateDynamicQuestion, getBeijingTimeStr } from './worker.js';
 import assert from 'node:assert';
 
 async function createTestBot() {
@@ -102,67 +102,64 @@ async function testEmojiDynamicQuestion() {
   console.log(`✓ Passed: 成功生成 Emoji 题目: "${q.question}"，按键选项: [${q.options.join(', ')}]，完全符合人类直觉。`);
 }
 
-// --- Test 3: /kqfy 双模防御热切换 ---
-async function testShieldDualModeSwitching() {
-  console.log('--- Test 3: /kqfy 双模防御热切换 (1标准 / 2终极) ---');
-  const { bot, env, sentMessages } = await createTestBot();
-  const adminId = 999999;
-
-  // 1. 发送 /kqfy 2 切换为终极模式
-  await bot.handleAdminMessage({ chat: { id: adminId }, from: { id: adminId }, text: '/kqfy 2' }, 'zh');
-  let levelInKv = await env.nfd.get('config:shield_level');
-  assert.strictEqual(levelInKv, '2', 'KV 中必须记录为终极模式 2');
-  let lastMsg = sentMessages[sentMessages.length - 1];
-  assert(lastMsg.text.includes('终极模式'), '必须提示切换为终极模式');
-
-  // 2. 发送 /kqfy 弹出双模控制面板
-  await bot.handleAdminMessage({ chat: { id: adminId }, from: { id: adminId }, text: '/kqfy' }, 'zh');
-  lastMsg = sentMessages[sentMessages.length - 1];
-  assert(lastMsg.reply_markup?.inline_keyboard?.length === 2, '按键面板必须只呈现 2 个大按键');
-
-  // 3. 发送 /kqfy 1 切回标准模式
-  await bot.handleAdminMessage({ chat: { id: adminId }, from: { id: adminId }, text: '/kqfy 1' }, 'zh');
-  levelInKv = await env.nfd.get('config:shield_level');
-  assert.strictEqual(levelInKv, '1', 'KV 中必须记录为标准模式 1');
-  console.log('✓ Passed: /kqfy 双模热切换极简顺畅，零多余认知负担。');
-}
-
-// --- Test 4: 终极模式 Cloudflare 网页盾牌与 Telegram Mini App 票据机制 ---
-async function testUltimateModeWebShield() {
-  console.log('--- Test 4: 终极模式 Cloudflare 网页盾牌与 Telegram Mini App 票据机制 ---');
-  const { bot, env, sentMessages } = await createTestBot();
+// --- Test 3: 趣味 Emoji 验证交互流程 (点击正确答案立即放行发信) ---
+async function testEmojiVerificationFlow() {
+  console.log('--- Test 3: 趣味 Emoji 原生验证交互流程 ---');
+  const { bot, env, sentMessages, editedMessages, callbacksAnswered } = await createTestBot();
   const guestChatId = 77777;
 
-  // 设置为终极模式 2
-  await env.nfd.put('config:shield_level', '2');
-
-  // 访客发信，应该收到 Telegram Mini App 网页验证按键
+  // 1. 访客初次发信，触发 Emoji 出题
   await bot.handleGuestMessage({
     chat: { id: guestChatId },
     from: { id: guestChatId, language_code: 'zh' },
     message_id: 10,
     text: '你好，咨询业务'
-  }, 'zh', 'bot.example.com');
+  }, 'zh');
 
   const verifyMsg = sentMessages.find(m => m.chat_id === guestChatId && m.reply_markup?.inline_keyboard);
-  assert(verifyMsg, '终极模式下访客必须收到网页验证按钮');
-  const webAppBtn = verifyMsg.reply_markup.inline_keyboard[0][0];
-  assert(webAppBtn.web_app && webAppBtn.web_app.url, '必须采用 Telegram Mini App (web_app) 按钮，杜绝外部跳转弹窗');
-  assert(webAppBtn.web_app.url.includes('/verify?t=tk_'), '按键链接必须包含不透明一次性票据 ?t=tk_，严禁明文暴露 uid');
-  assert(!webAppBtn.web_app.url.includes('uid='), 'URL 严禁包含 uid 明文');
+  assert(verifyMsg, '访客初次发信必须收到 Emoji 视觉算术题目');
+  assert(verifyMsg.text.includes('防骚扰人机验证'), '必须发送人机验证说明');
 
-  // 校验 KV 中票据有效关联
-  const urlObj = new URL(webAppBtn.web_app.url);
-  const ticket = urlObj.searchParams.get('t');
-  const mappedUid = await env.nfd.get(`ticket:${ticket}`);
-  assert.strictEqual(mappedUid, String(guestChatId), '票据必须安全映射到访客 chatId');
+  // 2. 从 KV 读取当前题目的正确答案索引
+  const vstate = await env.nfd.get(`verify:${guestChatId}`, { type: 'json' });
+  assert(!vstate.verified, '出题后初始状态为未验证');
+  const correctIdx = vstate.correctIndex;
+  const qid = vstate.questionId;
 
-  console.log('✓ Passed: 终极模式 Telegram Mini App 与票据脱敏机制运转无误。');
+  // 3. 访客点击正确答案 (v:qid:correctIndex)
+  await bot.onCallbackQuery({
+    id: 'cb_test_correct',
+    data: `v:${qid}:${correctIdx}`,
+    from: { id: guestChatId, language_code: 'zh' },
+    message: { chat: { id: guestChatId }, message_id: 1001 }
+  });
+
+  // 4. 验证回调反馈与状态更新
+  const cbAns = callbacksAnswered.find(c => c.callback_query_id === 'cb_test_correct');
+  assert(cbAns, '必须应答 Callback Query');
+  const successEdit = editedMessages.find(m => m.text && m.text.includes('验证通过'));
+  assert(successEdit, '消息必须原地被更新为“验证通过”');
+
+  const updatedState = await env.nfd.get(`verify:${guestChatId}`, { type: 'json' });
+  assert.strictEqual(updatedState.verified, true, 'KV 中必须记录为已验证通过');
+
+  // 5. 验证通过后访客再次打字发信，直接放行送达管理员，绝不弹出任何验证
+  sentMessages.length = 0;
+  await bot.handleGuestMessage({
+    chat: { id: guestChatId },
+    from: { id: guestChatId, language_code: 'zh' },
+    message_id: 11,
+    text: '老板在吗？'
+  }, 'zh');
+
+  const notifyMsg = sentMessages.find(m => m.chat_id === guestChatId && m.text.includes('已转发给主人'));
+  assert(notifyMsg, '验证通过后访客消息必须成功转发给管理员并给出送达提示');
+  console.log('✓ Passed: Emoji 原生验证点击通过后即刻畅行无阻，无任何延迟死循环。');
 }
 
-// --- Test 5: 正常用户交流文章/博客链接零误伤通过 ---
+// --- Test 4: 正常用户交流文章/博客链接零误伤通过 ---
 async function testNormalLinkNotBlocked() {
-  console.log('--- Test 5: 正常用户交流文章/博客链接零误伤通过 ---');
+  console.log('--- Test 4: 正常用户交流文章/博客链接零误伤通过 ---');
   const { bot, env, sentMessages } = await createTestBot();
   const guestChatId = 88888;
   const now = Date.now();
@@ -185,9 +182,9 @@ async function testNormalLinkNotBlocked() {
   console.log('✓ Passed: 彻底杜绝误伤，正常的文章/教程链接交流畅行无阻。');
 }
 
-// --- Test 6: 纯正中英双语隔离与一键切换 ---
+// --- Test 5: 纯正中英双语隔离与一键切换 ---
 async function testBilingualSwitch() {
-  console.log('--- Test 6: 纯正中英双语隔离与一键切换 ---');
+  console.log('--- Test 5: 纯正中英双语隔离与一键切换 ---');
   const { bot, env, editedMessages } = await createTestBot();
   const guestChatId = 99999;
   const now = Date.now();
@@ -211,9 +208,9 @@ async function testBilingualSwitch() {
   console.log('✓ Passed: 纯双语隔离无串味，一键切换秒级重绘。');
 }
 
-// --- Test 7: 已验证状态下 /start 友好提示与 /reset 重新获取验证 ---
+// --- Test 6: 已验证状态下 /start 友好提示与 /reset 重新获取验证 ---
 async function testStartAndReverify() {
-  console.log('--- Test 7: 已验证状态下 /start 友好提示与 /reset 重新获取验证 ---');
+  console.log('--- Test 6: 已验证状态下 /start 友好提示与 /reset 重新获取验证 ---');
   const { bot, env, sentMessages } = await createTestBot();
   const guestChatId = 66666;
   const now = Date.now();
@@ -222,14 +219,14 @@ async function testStartAndReverify() {
   await env.nfd.put(`session:${guestChatId}`, JSON.stringify({ sid: 'sess_66', at: now }));
   await env.nfd.put(`verify:${guestChatId}`, JSON.stringify({ verified: true, verifiedAt: now }));
 
-  // 1. 已验证访客发送 /start：不应抹除验证重新强制弹题，而是告知已验证并附带重测按钮
-  await bot.onMessage({ chat: { id: guestChatId }, from: { id: guestChatId, language_code: 'zh' }, text: '/start' }, 'bot.example.com');
+  // 1. 已验证访客发送 /start：告知已验证并附带重测按钮
+  await bot.onMessage({ chat: { id: guestChatId }, from: { id: guestChatId, language_code: 'zh' }, text: '/start' });
   let lastMsg = sentMessages[sentMessages.length - 1];
   assert(lastMsg.text.includes('已通过人机安全验证'), '必须提示已验证');
   assert(lastMsg.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data === 'force_reverify', '必须提供重新验证按键供测试');
 
-  // 2. 访客发送 /reset 或点击重新出题：会话清空并立即重新出题
-  await bot.onMessage({ chat: { id: guestChatId }, from: { id: guestChatId, language_code: 'zh' }, text: '/reset' }, 'bot.example.com');
+  // 2. 访客发送 /reset：会话清空并立即重新出题
+  await bot.onMessage({ chat: { id: guestChatId }, from: { id: guestChatId, language_code: 'zh' }, text: '/reset' });
   const reverifyMsg = sentMessages[sentMessages.length - 1];
   assert(reverifyMsg.reply_markup?.inline_keyboard, '重置后必须立即生成新验证');
   const vstate = await env.nfd.get(`verify:${guestChatId}`, { type: 'json' });
@@ -238,92 +235,112 @@ async function testStartAndReverify() {
   console.log('✓ Passed: /start 已验证提示与 /reset 重新验证逻辑严密流畅。');
 }
 
-// --- Test 8: 终极模式未验证发信精准引导与 Turnstile 官方密钥校验 ---
-async function testUltimateModeWaitingHintAndSecret() {
-  console.log('--- Test 8: 终极模式未验证发信精准引导与 Turnstile 官方密钥校验 ---');
-  const { bot, env, sentMessages } = await createTestBot();
+// --- Test 7: 连续答错 3 次自动熔断锁定 (Anti-DDoS 零写保护) ---
+async function testLockoutAfterThreeFails() {
+  console.log('--- Test 7: 连续答错 3 次自动熔断锁定 (Anti-DDoS 零写保护) ---');
+  const { bot, env, editedMessages, callbacksAnswered } = await createTestBot();
   const guestChatId = 55555;
+  const now = Date.now();
 
-  // 1. 验证默认 Turnstile 秘钥严格符合 Cloudflare 官方 35 位规范
-  assert.strictEqual(bot.turnstileSecretKey.length, 35, 'Turnstile 默认 secret key 必须是 35 字符');
-  assert.strictEqual(bot.turnstileSecretKey, '1x0000000000000000000000000000000AA', '必须匹配 Cloudflare 官方交互式测试秘钥');
+  await env.nfd.put(`session:${guestChatId}`, JSON.stringify({ sid: 'sess_fail', at: now }));
+  await bot.issueQuestion(guestChatId, 'zh', 'sess_fail', 0);
 
-  // 2. 终极模式下未通过验证的访客打字发信，必须收到专属高防提示及 Mini App 按键，绝不能提示“算术题”
-  await env.nfd.put('config:shield_level', '2');
-  await env.nfd.put(`session:${guestChatId}`, JSON.stringify({ sid: 'sess_55', at: Date.now() }));
-  await bot.issueQuestion(guestChatId, 'zh', 'sess_55', 0, 'bot.example.com');
+  // 模拟连续答错 3 次
+  for (let i = 1; i <= 3; i++) {
+    const vstate = await env.nfd.get(`verify:${guestChatId}`, { type: 'json' });
+    const wrongIdx = (vstate.correctIndex + 1) % 4;
+    await bot.onCallbackQuery({
+      id: `cb_fail_${i}`,
+      data: `v:${vstate.questionId}:${wrongIdx}`,
+      from: { id: guestChatId, language_code: 'zh' },
+      message: { chat: { id: guestChatId }, message_id: 888 }
+    });
+  }
 
-  sentMessages.length = 0;
-  await bot.handleGuestMessage({ chat: { id: guestChatId }, from: { id: guestChatId, language_code: 'zh' }, text: '你好' }, 'zh', 'bot.example.com');
-  const lastMsg = sentMessages[sentMessages.length - 1];
-  assert(!lastMsg.text.includes('数字按钮'), '终极模式提示语严禁出现任何“数字按钮”或算术相关文案');
-  assert(lastMsg.text.includes('请先完成高防安全验证'), '终极模式必须发送高防安全验证引导文案');
-  assert(lastMsg.reply_markup?.inline_keyboard?.[0]?.[0]?.web_app?.url.includes('/verify?t='), '提示消息必须直接附带 Mini App 验证按键');
+  // 验证第 3 次答错后被锁定 30 分钟
+  const finalState = await env.nfd.get(`verify:${guestChatId}`, { type: 'json' });
+  assert(finalState.lockedUntil > Date.now(), '3 次答错必须锁定');
 
-  console.log('✓ Passed: 终极模式未验证发信精准引导与 Turnstile 密钥校验均完美通过。');
+  const lockoutMsg = editedMessages.find(m => m.text && m.text.includes('达到上限'));
+  assert(lockoutMsg, '第 3 次错误必须向访客展示锁定提示');
+  console.log('✓ Passed: 连错 3 次触发 30 分钟静默熔断，免费配额受护无虞。');
 }
 
-// --- Test 9: 终极模式跨地域 KV 缓存同步兜底机制 (零延迟即时通过) ---
-async function testCrossRegionKvDelay() {
-  console.log('--- Test 9: 终极模式跨地域 KV 缓存同步兜底机制 (零延迟即时通过) ---');
+// --- Test 8: 管理员影子静默拉黑与解封 (/block & /unblock) ---
+async function testAdminShadowban() {
+  console.log('--- Test 8: 管理员影子静默拉黑与解封 (/block & /unblock) ---');
   const { bot, env, sentMessages } = await createTestBot();
-  const guestChatId = 44444;
+  const adminId = 999999;
+  const badGuestId = 33333;
 
-  // 1. 设置为终极模式 2，并初始化出题
-  await env.nfd.put('config:shield_level', '2');
-  await env.nfd.put(`session:${guestChatId}`, JSON.stringify({ sid: 'sess_44', at: Date.now() }));
-  await bot.issueQuestion(guestChatId, 'zh', 'sess_44', 0, 'bot.example.com');
+  // 1. 管理员执行 /block
+  await bot.handleAdminMessage({ chat: { id: adminId }, from: { id: adminId }, text: `/block ${badGuestId}` }, 'zh');
+  const isBlocked = await env.nfd.get(`block:${badGuestId}`);
+  assert.strictEqual(isBlocked, '1', 'KV 中必须记录为已拉黑');
 
-  // 获取生成的 ticket
-  const verifyMsg = sentMessages[sentMessages.length - 1];
-  const urlObj = new URL(verifyMsg.reply_markup.inline_keyboard[0][0].web_app.url);
-  const ticket = urlObj.searchParams.get('t');
-
-  // 2. 模拟边缘节点旧缓存情况：
-  // 亚洲节点在 /verify/submit 验证通过，将 ticket 标记为 PASSED
-  await env.nfd.put(`ticket:${ticket}`, 'PASSED');
-  // 但欧洲 Telegram Webhook 节点的 verify:${guestChatId} 边缘缓存仍残留 verified: false 状态
-  await env.nfd.put(`verify:${guestChatId}`, JSON.stringify({
-    sessionId: 'sess_44',
-    questionId: ticket,
-    correctIndex: 0,
-    exp: Date.now() + 15 * 60 * 1000,
-    verified: false,
-    failCount: 0,
-    lockedUntil: 0
-  }));
-
+  // 2. 被拉黑者发信，机器人后台静默丢弃
   sentMessages.length = 0;
-  // 3. 访客在 Telegram 中立即发信："我通过验证了真牛逼。"
+  await bot.handleGuestMessage({
+    chat: { id: badGuestId },
+    from: { id: badGuestId, language_code: 'zh' },
+    message_id: 300,
+    text: '恶意广告推广内容'
+  }, 'zh');
+  assert.strictEqual(sentMessages.length, 0, '被拉黑者发信必须被 100% 静默丢弃');
+
+  // 3. 管理员执行 /unblock
+  await bot.handleAdminMessage({ chat: { id: adminId }, from: { id: adminId }, text: `/unblock ${badGuestId}` }, 'zh');
+  const unblocked = await env.nfd.get(`block:${badGuestId}`);
+  assert.strictEqual(unblocked, null, '解封后 block 记录必须被删除');
+  console.log('✓ Passed: 影子拉黑静默优雅，解封干净利落。');
+}
+
+// --- Test 9: 广告黑产关键词添加、拦截与删除 (/addkw & /delkw) ---
+async function testKeywordFiltering() {
+  console.log('--- Test 9: 广告黑产关键词添加、拦截与删除 (/addkw & /delkw) ---');
+  const { bot, env, sentMessages } = await createTestBot();
+  const adminId = 999999;
+  const guestChatId = 22222;
+  const now = Date.now();
+
+  await env.nfd.put(`session:${guestChatId}`, JSON.stringify({ sid: 'sess_kw', at: now }));
+  await env.nfd.put(`verify:${guestChatId}`, JSON.stringify({ verified: true, verifiedAt: now }));
+
+  // 1. 管理员添加敏感词
+  await bot.handleAdminMessage({ chat: { id: adminId }, from: { id: adminId }, text: '/addkw 菠菜引流' }, 'zh');
+
+  // 2. 访客发送命中关键词的内容
+  sentMessages.length = 0;
   await bot.handleGuestMessage({
     chat: { id: guestChatId },
     from: { id: guestChatId, language_code: 'zh' },
-    message_id: 205,
-    text: '我通过验证了真牛逼。'
-  }, 'zh', 'bot.example.com');
+    message_id: 401,
+    text: '专业博彩项目，菠菜引流首选'
+  }, 'zh');
 
-  // 4. 断言：绝不能再次弹出高防安全验证提示，而是成功放行消息
-  const blockedMsg = sentMessages.find(m => m.chat_id === guestChatId && m.text && m.text.includes('高防安全验证'));
-  assert(!blockedMsg, '通过跨地域兜底机制后，绝严禁重复弹出验证按钮！');
+  const blockedNotice = sentMessages.find(m => m.chat_id === guestChatId && m.text.includes('被拦截的敏感内容'));
+  assert(blockedNotice, '访客端必须收到敏感词拦截提示');
+  const adminAlert = sentMessages.find(m => m.chat_id === String(adminId) && m.text.includes('命中敏感词'));
+  assert(adminAlert, '管理员端必须收到精准告警');
 
-  // 5. 校验本地 KV 缓存已同步更新为 verified: true
-  const updatedState = await env.nfd.get(`verify:${guestChatId}`, { type: 'json' });
-  assert.strictEqual(updatedState.verified, true, '本地缓存状态必须被实时刷新为已验证通过');
-
-  console.log('✓ Passed: 终极模式跨地域 KV 缓存同步兜底机制运转完美，彻底杜绝验证死循环！');
+  // 3. 管理员删除敏感词
+  await bot.handleAdminMessage({ chat: { id: adminId }, from: { id: adminId }, text: '/delkw 菠菜引流' }, 'zh');
+  const kwList = await bot.loadLocalKeywords();
+  assert(!kwList.includes('菠菜引流'), '敏感词必须已被删除');
+  console.log('✓ Passed: 敏感词动态过滤系统运转精准无误。');
 }
 
 async function main() {
   await testQuoteReplyContext();
   await testEmojiDynamicQuestion();
-  await testShieldDualModeSwitching();
-  await testUltimateModeWebShield();
+  await testEmojiVerificationFlow();
   await testNormalLinkNotBlocked();
   await testBilingualSwitch();
   await testStartAndReverify();
-  await testUltimateModeWaitingHintAndSecret();
-  await testCrossRegionKvDelay();
-  console.log('\n🌟 ALL 9 PRODUCTION TEST SUITES PASSED PERFECTLY (v2.6.0)!');
+  await testLockoutAfterThreeFails();
+  await testAdminShadowban();
+  await testKeywordFiltering();
+  console.log('\n🌟 ALL 9 PRODUCTION TEST SUITES PASSED PERFECTLY (v3.0.0-Shield)!');
 }
 
 main().catch(err => {
