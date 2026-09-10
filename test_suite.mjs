@@ -238,6 +238,31 @@ async function testStartAndReverify() {
   console.log('✓ Passed: /start 已验证提示与 /reset 重新验证逻辑严密流畅。');
 }
 
+// --- Test 8: 终极模式未验证发信精准引导与 Turnstile 官方密钥校验 ---
+async function testUltimateModeWaitingHintAndSecret() {
+  console.log('--- Test 8: 终极模式未验证发信精准引导与 Turnstile 官方密钥校验 ---');
+  const { bot, env, sentMessages } = await createTestBot();
+  const guestChatId = 55555;
+
+  // 1. 验证默认 Turnstile 秘钥严格符合 Cloudflare 官方 35 位规范
+  assert.strictEqual(bot.turnstileSecretKey.length, 35, 'Turnstile 默认 secret key 必须是 35 字符');
+  assert.strictEqual(bot.turnstileSecretKey, '1x0000000000000000000000000000000AA', '必须匹配 Cloudflare 官方交互式测试秘钥');
+
+  // 2. 终极模式下未通过验证的访客打字发信，必须收到专属高防提示及 Mini App 按键，绝不能提示“算术题”
+  await env.nfd.put('config:shield_level', '2');
+  await env.nfd.put(`session:${guestChatId}`, JSON.stringify({ sid: 'sess_55', at: Date.now() }));
+  await bot.issueQuestion(guestChatId, 'zh', 'sess_55', 0, 'bot.example.com');
+
+  sentMessages.length = 0;
+  await bot.handleGuestMessage({ chat: { id: guestChatId }, from: { id: guestChatId, language_code: 'zh' }, text: '你好' }, 'zh', 'bot.example.com');
+  const lastMsg = sentMessages[sentMessages.length - 1];
+  assert(!lastMsg.text.includes('数字按钮'), '终极模式提示语严禁出现任何“数字按钮”或算术相关文案');
+  assert(lastMsg.text.includes('请先完成高防安全验证'), '终极模式必须发送高防安全验证引导文案');
+  assert(lastMsg.reply_markup?.inline_keyboard?.[0]?.[0]?.web_app?.url.includes('/verify?t='), '提示消息必须直接附带 Mini App 验证按键');
+
+  console.log('✓ Passed: 终极模式未验证发信精准引导与 Turnstile 密钥校验均完美通过。');
+}
+
 async function main() {
   await testQuoteReplyContext();
   await testEmojiDynamicQuestion();
@@ -246,7 +271,8 @@ async function main() {
   await testNormalLinkNotBlocked();
   await testBilingualSwitch();
   await testStartAndReverify();
-  console.log('\n🌟 ALL 7 PRODUCTION TEST SUITES PASSED PERFECTLY (v2.5.0)!');
+  await testUltimateModeWaitingHintAndSecret();
+  console.log('\n🌟 ALL 8 PRODUCTION TEST SUITES PASSED PERFECTLY (v2.5.0)!');
 }
 
 main().catch(err => {

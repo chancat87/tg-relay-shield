@@ -173,6 +173,7 @@ const I18N = {
     rateLimited: '⏳ 发送频率过快，请稍后再试。',
     ultimateVerifyPrompt: '🛡 <b>高防安全验证</b>\n系统当前处于高防状态，请点击下方按钮完成安全验证：',
     ultimateVerifyBtn: '🛡️ 点击进入安全验证 (Cloudflare)',
+    ultimateWaitingHint: '🛡️ <b>请先完成高防安全验证</b>\n系统当前处于高防状态，请点击下方按钮进入验证以继续留言：',
     guestVerifiedStart: '👋 您好！我是私聊中转助手。\n\n您已通过人机安全验证，可以直接在此发送文字、图片、语音或文件，我会帮您安全转达给主人。\n\n💡 若您想重新获取验证题进行测试，请点击下方按钮：',
     reverifyBtn: '🔄 重新验证 / 重新出题',
     reverifyNotice: '正在为您生成新验证...',
@@ -187,7 +188,7 @@ const I18N = {
     verifyPrompt: '🛡 <b>Anti-Spam Verification</b>\nPlease count the emojis and tap the correct answer:\n\n❓ ',
     verifyPick: '\n\n👇 Tap the correct number:',
     verifySuccess: '✅ Verified! You can now send messages normally.',
-    verifyWaitingHint: '👆 Please tap one of the number buttons above.',
+    verifyWaitingHint: '👆 Please tap the number button on the question above.',
     verifyWrongNotice: '❌ Wrong answer! {rem} attempt(s) remaining.',
     verifyLockoutToast: '❌ Failed {count} times! Locked for 30 minutes.',
     verifyLockoutMsg: '🚫 Verification limit reached ({count}/3).\nYou have been locked out for 30 minutes. Please try again later.',
@@ -202,6 +203,7 @@ const I18N = {
     rateLimited: '⏳ You are sending too fast. Please wait a moment.',
     ultimateVerifyPrompt: '🛡 <b>Security Verification</b>\nHigh-security shield is active. Tap the button below to complete verification:',
     ultimateVerifyBtn: '🛡️ Complete Verification (Cloudflare)',
+    ultimateWaitingHint: '🛡️ <b>Please complete security challenge</b>\nHigh-security shield is active. Tap the button below to complete verification:',
     guestVerifiedStart: "👋 Hello! I am the contact relay assistant.\n\nYou have already passed verification! Feel free to send text, photos, files, or voice messages here and I will relay them to the owner.\n\n💡 If you want to re-verify for testing, please tap below:",
     reverifyBtn: '🔄 Re-verify / New Challenge',
     reverifyNotice: 'Generating new challenge...',
@@ -247,9 +249,9 @@ class BotCore {
     this.rateLimitCount = getIntEnv(env, 'RATE_LIMIT_MESSAGE', 45);
     this.rateLimitWindow = getIntEnv(env, 'RATE_LIMIT_WINDOW_SECONDS', 60);
 
-    // Turnstile 配置 (默认启用 Cloudflare 官方交互式挑战 Key，确保 100% 弹出真实验证框)
-    this.turnstileSiteKey = getEnv(env, 'TURNSTILE_SITE_KEY') || '1x00000000000000000000AA';
-    this.turnstileSecretKey = getEnv(env, 'TURNSTILE_SECRET_KEY') || '1x00000000000000000000000000000000AA';
+    // Turnstile 配置 (默认启用 Cloudflare 官方交互式测试 Key：31 个 0，严格符合官方规范)
+    this.turnstileSiteKey = getEnv(env, 'TURNSTILE_SITE_KEY') || '3x00000000000000000000FF';
+    this.turnstileSecretKey = getEnv(env, 'TURNSTILE_SECRET_KEY') || '1x0000000000000000000000000000000AA';
 
     this.maxFailAttempts = 3;
     this.lockoutDurationMs = 30 * 60 * 1000;
@@ -702,9 +704,28 @@ class BotCore {
 
     const isVerified = vstate && vstate.verified && (Date.now() - vstate.verifiedAt < this.verifiedTtlSeconds * 1000);
     if (!isVerified) {
+      const shieldLevel = await this.getShieldLevel();
       const hasActiveQuestion = vstate && !vstate.verified && vstate.exp && Date.now() < vstate.exp;
       if (hasActiveQuestion) {
-        await this.api('sendMessage', { chat_id: chatId, text: t(lang, 'verifyWaitingHint') });
+        if (shieldLevel === 2) {
+          // 模式 2：高防安全盾提示，就地附带当前有效 ticket 的 Mini App 快捷按键
+          const ticket = (vstate.questionId && vstate.questionId.startsWith('tk_')) ? vstate.questionId : null;
+          const verifyUrl = ticket && hostname ? `https://${hostname}/verify?t=${ticket}` : null;
+          const keyboard = verifyUrl ? {
+            inline_keyboard: [
+              [{ text: t(lang, 'ultimateVerifyBtn'), web_app: { url: verifyUrl } }]
+            ]
+          } : undefined;
+          await this.api('sendMessage', {
+            chat_id: chatId,
+            text: t(lang, 'ultimateWaitingHint'),
+            parse_mode: 'HTML',
+            reply_markup: keyboard
+          });
+        } else {
+          // 模式 1：标准 Emoji 算术提示
+          await this.api('sendMessage', { chat_id: chatId, text: t(lang, 'verifyWaitingHint') });
+        }
       } else {
         // 自动出题 (标准模式 Emoji 算术 / 终极模式网页盾牌)
         await this.issueQuestion(chatId, lang, sess.sid, vstate?.failCount || 0, hostname);
@@ -1188,7 +1209,8 @@ async function handleHttp(request, env, ctx) {
           });
           const verifyData = await verifyResp.json();
           if (!verifyData.success) {
-            return new Response(JSON.stringify({ ok: false, error: 'Cloudflare Turnstile 验证未通过' }), {
+            const errCodes = (verifyData['error-codes'] || []).join(', ');
+            return new Response(JSON.stringify({ ok: false, error: `Cloudflare Turnstile 验证未通过 (${errCodes || 'fail'})` }), {
               headers: { 'Content-Type': 'application/json' }
             });
           }
