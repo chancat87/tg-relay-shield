@@ -71,19 +71,6 @@ function timingSafeEqual(a, b) {
   return result === 0;
 }
 
-// 提取访客引用回复的消息摘要
-function extractQuoteSnippet(replyMsg) {
-  if (!replyMsg) return '';
-  if (replyMsg.text) return replyMsg.text.slice(0, 60);
-  if (replyMsg.caption) return replyMsg.caption.slice(0, 60);
-  if (replyMsg.photo) return '📷 [图片 / Photo]';
-  if (replyMsg.sticker) return '🎭 [贴纸 / Sticker]';
-  if (replyMsg.voice) return '🎤 [语音 / Voice]';
-  if (replyMsg.video) return '🎬 [视频 / Video]';
-  if (replyMsg.document) return `📄 [文件: ${replyMsg.document.file_name || 'Document'}]`;
-  return '📎 [媒体内容 / Media]';
-}
-
 // ========================= Emoji 动态视觉算术出题器 =========================
 
 const EMOJI_POOL = ['🍎', '🍊', '🍇', '🍓', '🍒', '⭐', '🎈', '🚀', '🐱', '🐶', '🚗', '☕', '🎁', '🌻', '💎', '🔔'];
@@ -550,23 +537,47 @@ class BotCore {
       return;
     }
 
-    // 核心转发：管理员回复消息回传给访客
+    // 核心转发：管理员回复消息回传给访客（附带原生引用回复）
     if (msg.reply_to_message) {
       const originMsgId = msg.reply_to_message.message_id;
-      const targetGuestUid = await this.kv.get(`msg-map-${originMsgId}`);
-      if (!targetGuestUid) {
+      const rawMapping = await this.kv.get(`msg-map-${originMsgId}`);
+      if (!rawMapping) {
         await this.api('sendMessage', { chat_id: adminChatId, text: '❌ 无法定位该消息对应的访客（可能已过期或非转接消息）。' });
         return;
       }
 
-      const copyRes = await this.api('copyMessage', {
+      let targetGuestUid = rawMapping;
+      let targetGuestMsgId = null;
+      try {
+        const parsed = JSON.parse(rawMapping);
+        if (parsed && typeof parsed === 'object') {
+          targetGuestUid = parsed.uid;
+          targetGuestMsgId = parsed.guestMsgId;
+        }
+      } catch (_) {}
+
+      const copyParams = {
         chat_id: targetGuestUid,
         from_chat_id: adminChatId,
         message_id: msg.message_id
-      });
+      };
 
-      if (!copyRes.ok) {
-        await this.api('sendMessage', { chat_id: adminChatId, text: `❌ 回复发送失败：${copyRes.description || '未知原因'}` });
+      if (targetGuestMsgId) {
+        copyParams.reply_parameters = {
+          message_id: parseInt(targetGuestMsgId, 10),
+          allow_sending_without_reply: true
+        };
+      }
+
+      const copyRes = await this.api('copyMessage', copyParams);
+
+      if (copyRes && copyRes.ok && copyRes.result) {
+        const deliveredGuestMsgId = copyRes.result.message_id;
+        // 记录双向映射，有效期 14 天
+        await this.kv.put(`guest-to-admin:${deliveredGuestMsgId}`, String(msg.message_id), { expirationTtl: 14 * 86400 });
+        await this.kv.put(`msg-map-${msg.message_id}`, JSON.stringify({ uid: String(targetGuestUid), guestMsgId: deliveredGuestMsgId }), { expirationTtl: 14 * 86400 });
+      } else {
+        await this.api('sendMessage', { chat_id: adminChatId, text: `❌ 回复发送失败：${copyRes?.error || copyRes?.description || '未知原因'}` });
       }
       return;
     }
@@ -637,34 +648,43 @@ class BotCore {
       return;
     }
 
-    // 6. 【访客引用回复 (Quote) 上下文置顶还原】
-    if (msg.reply_to_message) {
-      const quoteSnippet = extractQuoteSnippet(msg.reply_to_message);
-      if (this.primaryAdminUid) {
-        await this.api('sendMessage', {
-          chat_id: this.primaryAdminUid,
-          text: `💬 <b>[对方引用了上下文]</b>：<i>"${escapeHtml(quoteSnippet)}"</i>`,
-          parse_mode: 'HTML'
-        });
-      }
-    }
-
-    // 7. 核心转发至管理员
+    // 6. 核心转发至管理员（支持原生引用回复双向映射）
     if (!this.primaryAdminUid) {
       await this.api('sendMessage', { chat_id: chatId, text: t(lang, 'forwardFail') });
       return;
     }
 
-    const fwdRes = await this.api('forwardMessage', {
-      chat_id: this.primaryAdminUid,
-      from_chat_id: chatId,
-      message_id: msg.message_id
-    });
+    let targetAdminMsgId = null;
+    if (msg.reply_to_message) {
+      targetAdminMsgId = await this.kv.get(`guest-to-admin:${msg.reply_to_message.message_id}`);
+    }
+
+    let fwdRes;
+    if (targetAdminMsgId) {
+      // 访客回复了某条消息：通过 copyMessage 附带原生 reply_parameters 呈现 Telegram 原生引用回复气泡
+      fwdRes = await this.api('copyMessage', {
+        chat_id: this.primaryAdminUid,
+        from_chat_id: chatId,
+        message_id: msg.message_id,
+        reply_parameters: {
+          message_id: parseInt(targetAdminMsgId, 10),
+          allow_sending_without_reply: true
+        }
+      });
+    } else {
+      // 访客普通发信：通过 forwardMessage 完整保留来源信息
+      fwdRes = await this.api('forwardMessage', {
+        chat_id: this.primaryAdminUid,
+        from_chat_id: chatId,
+        message_id: msg.message_id
+      });
+    }
 
     if (fwdRes && fwdRes.ok && fwdRes.result) {
       const adminFwdMsgId = fwdRes.result.message_id;
-      // 记录管理端消息 ID -> 访客 UID 映射（保留 14 天）
-      await this.kv.put(`msg-map-${adminFwdMsgId}`, String(chatId), { expirationTtl: 14 * 86400 });
+      // 记录双向映射（保留 14 天）
+      await this.kv.put(`msg-map-${adminFwdMsgId}`, JSON.stringify({ uid: String(chatId), guestMsgId: msg.message_id }), { expirationTtl: 14 * 86400 });
+      await this.kv.put(`guest-to-admin:${msg.message_id}`, String(adminFwdMsgId), { expirationTtl: 14 * 86400 });
       // 给访客温馨提示已送达
       await this.api('sendMessage', { chat_id: chatId, text: t(lang, 'notifyWaiting') });
     } else {

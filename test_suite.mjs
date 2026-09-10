@@ -5,6 +5,8 @@ async function createTestBot() {
   const sentMessages = [];
   const editedMessages = [];
   const callbacksAnswered = [];
+  const copiedMessages = [];
+  const forwardedMessages = [];
   const mockKv = new Map();
 
   const env = {
@@ -38,12 +40,17 @@ async function createTestBot() {
       editedMessages.push(body);
       return { ok: true, result: { message_id: body.message_id } };
     }
+    if (method === 'copyMessage') {
+      copiedMessages.push(body);
+      return { ok: true, result: { message_id: 2000 + copiedMessages.length } };
+    }
+    if (method === 'forwardMessage') {
+      forwardedMessages.push(body);
+      return { ok: true, result: { message_id: 3000 + forwardedMessages.length } };
+    }
     if (method === 'answerCallbackQuery') {
       callbacksAnswered.push(body);
       return { ok: true };
-    }
-    if (method === 'forwardMessage') {
-      return { ok: true, result: { message_id: 2000 + sentMessages.length } };
     }
     if (method === 'setMyCommands') {
       return { ok: true };
@@ -51,37 +58,66 @@ async function createTestBot() {
     return { ok: true };
   };
 
-  return { bot, env, sentMessages, editedMessages, callbacksAnswered, mockKv };
+  return { bot, env, sentMessages, editedMessages, callbacksAnswered, copiedMessages, forwardedMessages, mockKv };
 }
 
-// --- Test 1: 访客引用回复 (Quote) 上下文置顶还原 ---
+// --- Test 1: 原生双向引用回复 (Native Quote Reply) 完美镜像呈现 ---
 async function testQuoteReplyContext() {
-  console.log('--- Test 1: 访客引用回复 (Quote) 上下文还原 ---');
-  const { bot, env, sentMessages } = await createTestBot();
+  console.log('--- Test 1: 原生双向引用回复 (Native Quote Reply) 完美镜像呈现 ---');
+  const { bot, env, sentMessages, copiedMessages, forwardedMessages } = await createTestBot();
   const guestChatId = 12345;
+  const adminChatId = 999999;
   const now = Date.now();
 
   await env.nfd.put(`session:${guestChatId}`, JSON.stringify({ sid: 'sess_1', at: now }));
   await env.nfd.put(`verify:${guestChatId}`, JSON.stringify({ verified: true, verifiedAt: now }));
 
-  const msgWithReply = {
+  // 1. 访客首次发送消息 (ID: 50)
+  await bot.handleGuestMessage({
     chat: { id: guestChatId },
     from: { id: guestChatId, language_code: 'zh' },
     message_id: 50,
-    text: '这个方案价格是多少？',
-    reply_to_message: {
-      message_id: 40,
-      photo: [{ file_id: 'photo_abc' }],
-      caption: '这是之前分享的产品图文介绍'
-    }
-  };
+    text: '你好，在吗？'
+  }, 'zh');
 
-  await bot.handleGuestMessage(msgWithReply, 'zh');
+  const fwdToAdmin = forwardedMessages[forwardedMessages.length - 1];
+  assert(fwdToAdmin, '首次发信应转发给管理员');
+  const adminFwdMsgId = 3000 + forwardedMessages.length; // 3001
 
-  const quoteMsg = sentMessages.find(m => m.text && m.text.includes('[对方引用了上下文]'));
-  assert(quoteMsg, '管理员私聊必须收到置顶的引用上下文提示');
-  assert(quoteMsg.text.includes('这是之前分享的产品图文介绍'), '引用摘要必须准确呈现原消息内容');
-  console.log('✓ Passed: 访客引用图文上下文成功被提取并置顶推给管理员。');
+  // 2. 管理员对该条消息点击 Reply 进行回复 (Admin 消息 ID: 600)
+  await bot.handleAdminMessage({
+    chat: { id: adminChatId },
+    from: { id: adminChatId, language_code: 'zh' },
+    message_id: 600,
+    text: '好，你有事？',
+    reply_to_message: { message_id: adminFwdMsgId }
+  }, 'zh');
+
+  const adminReplyCopy = copiedMessages[copiedMessages.length - 1];
+  assert(adminReplyCopy, '管理员回复应 copyMessage 至访客私聊');
+  assert.strictEqual(adminReplyCopy.chat_id, String(guestChatId));
+  assert.strictEqual(adminReplyCopy.reply_parameters?.message_id, 50, '管理员发给访客的消息必须带原生 reply_parameters 引用访客原消息 50');
+  const deliveredGuestMsgId = 2000 + copiedMessages.length; // 2001
+
+  // 3. 访客在 Telegram 对管理员发来的消息 (2001) 点击 Reply 进行引用回复
+  await bot.handleGuestMessage({
+    chat: { id: guestChatId },
+    from: { id: guestChatId, language_code: 'zh' },
+    message_id: 51,
+    text: '哈哈哈哈这个表情包好好笑。',
+    reply_to_message: { message_id: deliveredGuestMsgId }
+  }, 'zh');
+
+  // 4. 断言：绝严禁出现丑陋的伪造文本 [对方引用了上下文]
+  const fakeNotice = sentMessages.find(m => m.text && m.text.includes('[对方引用了上下文]'));
+  assert(!fakeNotice, '严禁发送额外的 [对方引用了上下文] 纯文本消息！');
+
+  // 5. 断言：转发给管理员的消息必须带原生 reply_parameters 真实指向管理员之前的消息 600
+  const guestReplyCopy = copiedMessages[copiedMessages.length - 1];
+  assert(guestReplyCopy, '访客的引用回复必须以 copyMessage + reply_parameters 转发给管理员');
+  assert.strictEqual(guestReplyCopy.chat_id, String(adminChatId));
+  assert.strictEqual(guestReplyCopy.reply_parameters?.message_id, 600, '必须精准引用管理员的原消息 ID 600');
+  console.log('✓ Passed: 双向原生引用回复 (Native Quote Reply) 完美镜像打通，零多余虚假文本。');
 }
 
 // --- Test 2: 标准模式 Emoji 动态视觉算术题目 ---
