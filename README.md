@@ -101,14 +101,16 @@
 3. **绑定 KV 与环境变量**：
    * 回到该 Worker 的 **设置 (Settings)** 页面：
    * **绑定 KV**：在 **绑定 (Bindings)** 中添加 KV 命名空间，**变量名称必须严格填写为 `nfd`**，空间选择刚才创建的 `tg-relay-kv`。
-   * **添加环境变量**：在 **变量和机密 (Variables and Secrets)** 中添加以下 3 个变量：
-     * `BOT_TOKEN`: 你的机器人 Token
-     * `ADMIN_UID`: 你的 Telegram 纯数字 ID
-     * `BOT_SECRET`: 你设定的密钥字符串
+   * **添加环境变量**：在 **变量和机密 (Variables and Secrets)** 中添加以下变量：
+     * `BOT_TOKEN`: 你的机器人 Token（必填）
+     * `ADMIN_UID`: 你的 Telegram 纯数字 ID（必填）
+     * `BOT_SECRET`: 你设定的密钥字符串（必填）
+     * `TURNSTILE_SITE_KEY`: Cloudflare Turnstile 站点密钥（终极模式正式密钥，可选，未填时自动启用官方免配测试盾）
+     * `TURNSTILE_SECRET_KEY`: Cloudflare Turnstile 机密密钥（终极模式正式密钥，可选）
    * 点击 **保存并部署**。
 
 4. **一键激活（自动配置全量权限）**：
-   * （推荐绑定自定义域名，例如 `bot.yourdomain.com`，在 Worker 设置中绑定即可）。
+   * （推荐绑定自定义域名，例如 `tg.aichi.de5.net`，在 Worker 设置中绑定即可）。
    * 直接在浏览器访问：
      ```text
      https://你的域名/quick-setup
@@ -116,6 +118,18 @@
    * 看到返回 `{"ok": true, "result": true, "description": "Webhook was set"}` 即大功告成！
 
 ---
+
+### 🛡️ 获取 Cloudflare Turnstile 官方密钥（100% 免费，1 分钟搞定）
+如果您开启了 **模式 2【终极模式】** 并希望去除界面上的“仅用于测试”水印，可在 Cloudflare 免费申请正式生产密钥：
+1. 登录 [Cloudflare 控制台](https://dash.cloudflare.com/)，在左侧菜单点击 **Turnstile**。
+2. 点击右上角 **Add widget (添加小组件)**：
+   * **Widget name (小组件名称)**：如 `tg-relay-shield`
+   * **Domains (网域)**：输入您 Worker 绑定的域名（如 `tg.aichi.de5.net`）
+   * **Widget Mode (小组件模式)**：选择 **Managed (托管式，推荐)**
+3. 点击 **Create (创建)**，页面立即生成两串密钥：
+   * `Site Key (站点密钥)`：以 `0x4AAAAAA...` 开头
+   * `Secret Key (机密密钥)`：以 `0x4AAAAAA...` 开头
+4. 将它们分别填入 Worker 的 `TURNSTILE_SITE_KEY` 与 `TURNSTILE_SECRET_KEY` 环境变量中，点击保存部署即可！
 
 ### 方式 B：Wrangler CLI 命令行部署（开发者推荐）
 

@@ -82,6 +82,8 @@ Many people use Telegram bots as public contact points (a privacy relay between 
      * `BOT_TOKEN`: Your bot token.
      * `ADMIN_UID`: Your Telegram numeric ID.
      * `BOT_SECRET`: Your random secret token.
+     * `TURNSTILE_SITE_KEY`: (Optional) Custom Cloudflare Turnstile Site Key for Mode 2.
+     * `TURNSTILE_SECRET_KEY`: (Optional) Custom Cloudflare Turnstile Secret Key for Mode 2.
    * Click **Save and Deploy**.
 
 4. **Activate Bot**:
@@ -91,6 +93,20 @@ Many people use Telegram bots as public contact points (a privacy relay between 
      ```
      *(Or use your custom domain: `https://bot.yourdomain.com/quick-setup`)*
    * Seeing `{"ok": true, "result": true, "description": "Webhook was set"}` means you are good to go!
+
+---
+
+### 🛡️ Obtaining Cloudflare Turnstile Keys (100% Free, 1 Minute)
+If you enable **Mode 2 (Ultimate Shield)** and wish to use official custom keys without the test banner:
+1. Log in to the [Cloudflare Dashboard](https://dash.cloudflare.com/) and navigate to **Turnstile** on the left menu.
+2. Click **Add widget**:
+   * **Widget name**: e.g., `tg-relay-shield`
+   * **Domains**: Enter your Worker domain (e.g., `tg.aichi.de5.net`)
+   * **Widget Mode**: Select **Managed (Recommended)**
+3. Click **Create** to instantly generate:
+   * `Site Key`: Starting with `0x4AAAAAA...`
+   * `Secret Key`: Starting with `0x4AAAAAA...`
+4. Add them to your Worker's `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY` environment variables.
 
 ---
 
