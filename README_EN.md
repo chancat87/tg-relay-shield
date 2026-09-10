@@ -37,14 +37,23 @@ Many people use Telegram bots as public contact points (a privacy relay between 
 * ⚡ **3-Strike Lockout (Anti-Spam DDoS)**:
   * 3 consecutive wrong answers triggers an instant 30-minute lockout.
   * **Zero KV Writes during lockout**, making it impossible for malicious scripts to deplete your Cloudflare KV write quotas.
+* 💬 **Visitor Quote & Reply Context Restoration**:
+  * Solves the lost reply bubble issue in Telegram forwarding. When a visitor replies to a previous message, image, or media, a preview summary is automatically prepended for the admin.
+* 🛡️ **Instant Defense Level Switching (`/kqfy`)**:
+  * **Level 1 (Standard)**: Dynamic addition/subtraction.
+  * **Level 2 (Strict)**: Chinese numerals + blocks external links/usernames in the first message.
+  * **Level 3 (Ultimate)**: High-sensitivity shield. Switch via `/kqfy 1|2|3` or interactive button panel.
+* 🌐 **100% Pure Bilingual Isolation & 1-Tap Switcher**:
+  * Clean language isolation for English and Chinese users without mixed bilingual text.
+  * Auto-detects client language with a seamless `[ 🌐 Switch Language ]` button right inside the verification keypad.
 * 🥷 **Silent Shadowbanning**:
   * Blocking someone via `/block` silences their messages without alerting them, removing the incentive to switch accounts.
 * 🚫 **Two-Layer Keyword Filtering**:
   * Local and remote keyword lists. Messages containing ads or spam keywords are dropped before reaching you.
 * 🔒 **Complete Admin Anonymity**:
   * Supports replying even if the visitor has enabled "Hide Account on Forwarding". Your real Telegram identity remains 100% private.
-* 🛠️ **Zero-Friction Setup**:
-  * Built-in `/quick-setup` endpoint configures all Telegram update permissions (including `callback_query`) in a single click.
+* 🛠️ **Scope-Based Isolated Command Menus**:
+  * Configures separate command menus for visitors (`/start`, `/about`) and admins (`/kqfy`, `/block`, `/unblock`, `/addkw`, `/listkw`, `/help`, `/about`).
 
 ---
 
@@ -120,12 +129,14 @@ Execute these directly in your private chat with the bot:
 
 | Command | Usage | Description |
 | :--- | :--- | :--- |
-| **Reply to message** | Tap **Reply** on a forwarded message | Sends your reply directly to the guest |
+| **Reply to message** | Tap **Reply** on a forwarded message | Sends your reply directly to the guest (text, media, files) |
+| **`/kqfy`** | `/kqfy` or `/kqfy 1\|2\|3` | **Defense Level Hot-Switch**. Select level via command or interactive button panel |
 | **`/block`** | Reply to message OR `/block <uid>` | **Silent Shadowban**. Silently drops all future messages from this user |
 | **`/unblock`** | Reply to message OR `/unblock <uid>` | Unblocks the user and clears any lockout count |
 | **`/addkw <word>`** | `/addkw crypto` | Adds a local keyword filter |
 | **`/listkw`** | `/listkw` | Lists all active local keyword filters |
 | **`/help`** | `/help` | Displays the admin help menu |
+| **`/about`** | `/about` | Displays system status, version, and active defense level |
 
 ---
 
