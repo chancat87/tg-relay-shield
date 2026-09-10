@@ -145,7 +145,7 @@ async function testEmojiDynamicQuestion() {
 // --- Test 3: 趣味 Emoji 验证交互流程 (点击正确答案立即放行发信) ---
 async function testEmojiVerificationFlow() {
   console.log('--- Test 3: 趣味 Emoji 原生验证交互流程 ---');
-  const { bot, env, sentMessages, editedMessages, callbacksAnswered } = await createTestBot();
+  const { bot, env, sentMessages, editedMessages, callbacksAnswered, forwardedMessages } = await createTestBot();
   const guestChatId = 77777;
 
   // 1. 访客初次发信，触发 Emoji 出题
@@ -183,8 +183,9 @@ async function testEmojiVerificationFlow() {
   const updatedState = await env.nfd.get(`verify:${guestChatId}`, { type: 'json' });
   assert.strictEqual(updatedState.verified, true, 'KV 中必须记录为已验证通过');
 
-  // 5. 验证通过后访客再次打字发信，直接放行送达管理员，绝不弹出任何验证
+  // 5. 验证通过后访客再次打字发信：直接静默放行送达管理员，零重复弹窗打扰！
   sentMessages.length = 0;
+  const fwdCountBefore = forwardedMessages.length;
   await bot.handleGuestMessage({
     chat: { id: guestChatId },
     from: { id: guestChatId, language_code: 'zh' },
@@ -192,9 +193,9 @@ async function testEmojiVerificationFlow() {
     text: '老板在吗？'
   }, 'zh');
 
-  const notifyMsg = sentMessages.find(m => m.chat_id === guestChatId && m.text.includes('已转发给主人'));
-  assert(notifyMsg, '验证通过后访客消息必须成功转发给管理员并给出送达提示');
-  console.log('✓ Passed: Emoji 原生验证点击通过后即刻畅行无阻，无任何延迟死循环。');
+  assert.strictEqual(forwardedMessages.length, fwdCountBefore + 1, '消息必须已成功转发给管理员');
+  assert.strictEqual(sentMessages.length, 0, '验证有效期（3小时）内发信必须完全静默，绝不重复弹出“请耐心等待回复”刷屏');
+  console.log('✓ Passed: 验证通过提示一次到位，会话有效期内消息静默转达，清爽丝滑。');
 }
 
 // --- Test 4: 正常用户交流文章/博客链接零误伤通过 ---
@@ -262,7 +263,7 @@ async function testStartAndReverify() {
   // 1. 已验证访客发送 /start：告知已验证，彻底移除常驻重测按键，从源头切断脚本攻击面
   await bot.onMessage({ chat: { id: guestChatId }, from: { id: guestChatId, language_code: 'zh' }, text: '/start' });
   let lastMsg = sentMessages[sentMessages.length - 1];
-  assert(lastMsg.text.includes('已通过人机安全验证'), '必须提示已验证');
+  assert(lastMsg.text.includes('安全验证有效期内'), '必须提示已处于安全验证有效期内');
   assert(!lastMsg.reply_markup, '生产环境安全收敛：已验证访客主界面严禁提供常驻重新验证按键');
 
   // 2. 访客首次发送 /reset：重置会话并立即出题
@@ -405,6 +406,45 @@ async function testMenuSimplification() {
   console.log('✓ Passed: 菜单最后一行已精简为 "关于"，简单明了。');
 }
 
+// --- Test 11: 对话发言频率限制与超限零写保护 (Anti-Flood & Rate Limiting) ---
+async function testRateLimitingAndQuotaProtection() {
+  console.log('--- Test 11: 对话发言频率限制与超限零写保护 (Anti-Flood & Rate Limiting) ---');
+  const { bot, env, sentMessages, forwardedMessages } = await createTestBot();
+  const guestChatId = 77777;
+  const now = Date.now();
+
+  await env.nfd.put(`session:${guestChatId}`, JSON.stringify({ sid: 'sess_rate', at: now }));
+  await env.nfd.put(`verify:${guestChatId}`, JSON.stringify({ verified: true, verifiedAt: now }));
+  await env.nfd.put(`notify-cd:${guestChatId}`, '1');
+
+  // 1. 模拟访客在 1 分钟内发送 20 条消息（正常高频打字/发图）
+  for (let i = 1; i <= 20; i++) {
+    await bot.handleGuestMessage({
+      chat: { id: guestChatId },
+      from: { id: guestChatId, language_code: 'zh' },
+      message_id: 100 + i,
+      text: `第 ${i} 句话`
+    }, 'zh');
+  }
+
+  assert.strictEqual(forwardedMessages.length, 20, '前 20 条消息均应正常放行转发给管理员');
+
+  // 2. 发送第 21 条（触发限频）
+  sentMessages.length = 0;
+  await bot.handleGuestMessage({
+    chat: { id: guestChatId },
+    from: { id: guestChatId, language_code: 'zh' },
+    message_id: 121,
+    text: '第 21 句话（超出限制）'
+  }, 'zh');
+
+  const rateMsg = sentMessages.find(m => m.chat_id === guestChatId && m.text.includes('过于频繁'));
+  assert(rateMsg, '第 21 条发信必须被频控拦截并给出双语友好提示');
+  assert.strictEqual(forwardedMessages.length, 20, '超限消息绝不能转发给管理员，保护管理员手机免受轰炸');
+
+  console.log('✓ Passed: 说话频率限制精准生效，有效抵御垃圾脚本灌水轰炸。');
+}
+
 async function main() {
   await testQuoteReplyContext();
   await testEmojiDynamicQuestion();
@@ -416,7 +456,8 @@ async function main() {
   await testAdminShadowban();
   await testKeywordFiltering();
   await testMenuSimplification();
-  console.log('\n🌟 ALL 10 PRODUCTION TEST SUITES PASSED PERFECTLY (v3.1.0-Shield)!');
+  await testRateLimitingAndQuotaProtection();
+  console.log('\n🌟 ALL 11 PRODUCTION TEST SUITES PASSED PERFECTLY (v3.2.0-Shield)!');
 }
 
 main().catch(err => {

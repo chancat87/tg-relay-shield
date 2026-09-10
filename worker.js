@@ -41,7 +41,7 @@ function getIntEnv(env, name, def, fallbackName = null) {
   return Number.isFinite(v) && v > 0 ? v : def;
 }
 
-const BOT_VERSION = '3.1.0-Shield';
+const BOT_VERSION = '3.2.0-Shield';
 
 function getBeijingTimeStr() {
   const d = new Date(Date.now() + 8 * 3600 * 1000);
@@ -137,7 +137,7 @@ const I18N = {
     guestAbout: 'ℹ️ <b>关于此机器人</b>\n\n• 本机器人是主人的公开私聊中继助手。\n• 您可以直接在此发送文字、图片、语音或文件留言。\n• 机器人会自动将您的消息转交主人，主人的回复也会原样转达给您。\n• 沟通全程双方真实账号受到隐私保护。',
     verifyPrompt: '🛡 <b>防骚扰人机验证</b>\n请数出下方表情数量并点击正确答案：\n\n❓ ',
     verifyPick: '\n\n👇 请点击正确数字：',
-    verifySuccess: '✅ 验证通过！现在您可以正常发送消息留言了。',
+    verifySuccess: '✅ 验证通过！现已可以和主人对话，我会帮您转达给主人，请耐心等待回复。',
     verifyWaitingHint: '👆 请直接点击上方题目的数字按钮作答。',
     verifyWrongNotice: '❌ 答案错误！还剩 {rem} 次机会',
     verifyLockoutToast: '❌ 连续错误 {count} 次！已被锁定 30 分钟。',
@@ -150,8 +150,8 @@ const I18N = {
     forwardFail: '抱歉，消息未能转发给主人，请稍后重试。',
     notifyWaiting: '🔔 您的消息已转发给主人，请耐心等待回复。',
     keywordBlocked: '⚠️ 您的消息包含被拦截的敏感内容，未予转交。',
-    rateLimited: '⏳ 发送频率过快，请稍后再试。',
-    guestVerifiedStart: '👋 您好！我是私聊中转助手。\n\n您已通过人机安全验证，可以直接在此发送文字、图片、语音或文件，我会帮您安全转达给主人。',
+    rateLimited: '⏳ 您发送消息过于频繁，请稍后再试。',
+    guestVerifiedStart: '👋 您好！我是私聊中转助手。\n\n您处于安全验证有效期内，可以直接在此发送文字、图片、语音或文件留言，我会帮您转达给主人，请耐心等待回复。',
     reverifyBtn: '🔄 重新验证 / 重新出题',
     reverifyNotice: '正在为您生成新验证...',
     reverifyPrompt: '🔄 会话与验证状态已重置，请完成以下验证：',
@@ -165,7 +165,7 @@ const I18N = {
     guestAbout: 'ℹ️ <b>About This Bot</b>\n\n• This bot is the owner\'s public contact relay.\n• Feel free to send text, photos, files, or voice messages.\n• Messages are securely relayed to the owner, and replies are forwarded back.\n• Personal identities remain private for secure communication.',
     verifyPrompt: '🛡 <b>Anti-Spam Verification</b>\nPlease count the emojis and tap the correct answer:\n\n❓ ',
     verifyPick: '\n\n👇 Tap the correct number:',
-    verifySuccess: '✅ Verified! You can now send messages normally.',
+    verifySuccess: '✅ Verified! You can now chat with the owner. Your messages will be relayed, please wait for a reply.',
     verifyWaitingHint: '👆 Please tap the number button on the question above.',
     verifyWrongNotice: '❌ Wrong answer! {rem} attempt(s) remaining.',
     verifyLockoutToast: '❌ Failed {count} times! Locked for 30 minutes.',
@@ -178,8 +178,8 @@ const I18N = {
     forwardFail: 'Sorry, failed to forward your message. Please try again later.',
     notifyWaiting: '🔔 Your message has been forwarded. Please wait for a reply.',
     keywordBlocked: '⚠️ Your message contained blocked keywords and was dropped.',
-    rateLimited: '⏳ You are sending too fast. Please wait a moment.',
-    guestVerifiedStart: "👋 Hello! I am the contact relay assistant.\n\nYou have already passed verification! Feel free to send text, photos, files, or voice messages here and I will relay them to the owner.",
+    rateLimited: '⏳ You are sending messages too fast. Please slow down.',
+    guestVerifiedStart: "👋 Hello! I am the contact relay assistant.\n\nYou are verified! Feel free to send text, photos, files, or voice messages here and I will relay them to the owner, please wait for a reply.",
     reverifyBtn: '🔄 Re-verify / New Challenge',
     reverifyNotice: 'Generating new challenge...',
     reverifyPrompt: '🔄 Session and verification reset. Please complete verification:',
@@ -222,9 +222,9 @@ class BotCore {
     
     this.adminPath = String(getEnv(env, 'ADMIN_PATH') || 'admin_path').replace(/^\/+|\/+$/g, '');
     this.verifiedTtlSeconds = getIntEnv(env, 'VERIFIED_TTL_SECONDS', 3 * 3600);
-    this.rateLimitCount = getIntEnv(env, 'RATE_LIMIT_MESSAGE', 45);
+    this.rateLimitCount = getIntEnv(env, 'RATE_LIMIT_MESSAGE', 20); // 60 秒内最多 20 条，平衡正常交流与脚本防御
     this.rateLimitWindow = getIntEnv(env, 'RATE_LIMIT_WINDOW_SECONDS', 60);
-    this.notifyCooldownSeconds = getIntEnv(env, 'NOTIFY_COOLDOWN_SECONDS', 10 * 60); // 10 分钟静默窗口防刷屏
+    this.notifyCooldownSeconds = getIntEnv(env, 'NOTIFY_COOLDOWN_SECONDS', this.verifiedTtlSeconds); // 提示生命周期完全对齐验证有效期（默认 3 小时）
 
     this.maxFailAttempts = 3;
     this.lockoutDurationMs = 30 * 60 * 1000;
@@ -286,7 +286,7 @@ class BotCore {
     return null;
   }
 
-  // --- 频控检查 ---
+  // --- 频控检查 (带超限零写保护) ---
   async checkRateLimit(chatId) {
     const now = Math.floor(Date.now() / 1000);
     const key = `ratelimit:${chatId}`;
@@ -295,6 +295,11 @@ class BotCore {
     if (!record || now - record.start >= this.rateLimitWindow) {
       await this.kv.put(key, JSON.stringify({ count: 1, start: now }), { expirationTtl: this.rateLimitWindow });
       return false;
+    }
+
+    if (record.count > this.rateLimitCount) {
+      // 已经超限：直接秒拒，严禁继续写 KV 消耗配额
+      return true;
     }
 
     record.count += 1;
@@ -441,6 +446,7 @@ class BotCore {
       const newSessionId = Math.random().toString(36).slice(2, 10);
       await this.kv.put(`session:${chatId}`, JSON.stringify({ sid: newSessionId, at: Date.now() }), { expirationTtl: 30 * 86400 });
       await this.kv.delete(`verify:${chatId}`);
+      await this.kv.delete(`notify-cd:${chatId}`);
       await this.api('sendMessage', {
         chat_id: chatId,
         text: t(lang, 'reverifyPrompt')
@@ -500,6 +506,7 @@ class BotCore {
       }
       await this.kv.delete(`block:${targetUid}`);
       await this.kv.delete(`verify:${targetUid}`);
+      await this.kv.delete(`notify-cd:${targetUid}`);
       await this.api('sendMessage', { chat_id: adminChatId, text: `✅ 用户 \`${targetUid}\` 已解除屏蔽并清空惩罚状态。`, parse_mode: 'Markdown' });
       return;
     }
@@ -774,6 +781,7 @@ class BotCore {
       const newSessionId = Math.random().toString(36).slice(2, 10);
       await this.kv.put(`session:${userId}`, JSON.stringify({ sid: newSessionId, at: Date.now() }), { expirationTtl: 30 * 86400 });
       await this.kv.delete(`verify:${userId}`);
+      await this.kv.delete(`notify-cd:${userId}`);
       await this.issueQuestion(userId, lang, newSessionId, 0);
       return;
     }
@@ -846,6 +854,8 @@ class BotCore {
       vstate.failCount = 0;
       vstate.lockedUntil = 0;
       await this.kv.put(`verify:${userId}`, JSON.stringify(vstate), { expirationTtl: this.verifiedTtlSeconds });
+      // 验证通过时已明确提示，将等待通知的静默期与验证有效期（3 小时）完全对齐，会话期内后续发信 100% 静默转达
+      await this.kv.put(`notify-cd:${userId}`, '1', { expirationTtl: this.verifiedTtlSeconds });
       
       await this.api('answerCallbackQuery', { callback_query_id: cbq.id, text: '✅ OK' });
       await this.api('editMessageText', {
