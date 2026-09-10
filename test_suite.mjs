@@ -455,7 +455,7 @@ async function main() {
   await testKeywordFiltering();
   await testMenuSimplification();
   await testRateLimitingAndQuotaProtection();
-  console.log('\n🌟 ALL 11 PRODUCTION TEST SUITES PASSED PERFECTLY (v3.3.0-Shield)!');
+  console.log('\n🌟 ALL 11 PRODUCTION TEST SUITES PASSED PERFECTLY (v3.3.1-Shield)!');
 }
 
 main().catch(err => {

@@ -41,7 +41,7 @@ function getIntEnv(env, name, def, fallbackName = null) {
   return Number.isFinite(v) && v > 0 ? v : def;
 }
 
-const BOT_VERSION = '3.3.0-Shield';
+const BOT_VERSION = '3.3.1-Shield';
 
 function getBeijingTimeStr() {
   const d = new Date(Date.now() + 8 * 3600 * 1000);
@@ -135,7 +135,7 @@ const I18N = {
     adminStart: '👋 您好，管理员！TG-Relay-Shield 正在正常运行。\n\n输入 /help 可查看管理指令手册。',
     guestStart: '👋 您好！我是私聊中转助手。\n\n请直接在此发送消息，我会帮您安全转达给主人，并把回复带给您。',
     guestAbout: 'ℹ️ <b>关于此机器人</b>\n\n• 本机器人是主人的公开私聊中继助手。\n• 您可以直接在此发送文字、图片、语音或文件留言。\n• 机器人会自动将您的消息转交主人，主人的回复也会原样转达给您。\n• 沟通全程双方真实账号受到隐私保护。',
-    verifyPrompt: '🛡 <b>防骚扰人机验证</b>\n请数出下方表情数量并点击正确答案：\n\n❓ ',
+    verifyPrompt: '🛡 <b>防骚扰人机验证</b>\n请数出下方表情数量并点击正确答案：\n\n',
     verifyPick: '\n\n👇 请点击正确数字：',
     verifySuccess: '✅ 验证通过！现已可以和主人对话，我会帮您转达给主人，请耐心等待回复。',
     verifyWaitingHint: '👆 请直接点击上方题目的数字按钮作答。',
@@ -163,7 +163,7 @@ const I18N = {
     adminStart: '👋 Hello Admin! TG-Relay-Shield is running normally.\n\nType /help to view the admin command manual.',
     guestStart: "👋 Hello! I am the contact relay assistant.\n\nSend your message here, and I will safely forward it to the owner and bring back their reply.",
     guestAbout: 'ℹ️ <b>About This Bot</b>\n\n• This bot is the owner\'s public contact relay.\n• Feel free to send text, photos, files, or voice messages.\n• Messages are securely relayed to the owner, and replies are forwarded back.\n• Personal identities remain private for secure communication.',
-    verifyPrompt: '🛡 <b>Anti-Spam Verification</b>\nPlease count the emojis and tap the correct answer:\n\n❓ ',
+    verifyPrompt: '🛡 <b>Anti-Spam Verification</b>\nPlease count the emojis and tap the correct answer:\n\n',
     verifyPick: '\n\n👇 Tap the correct number:',
     verifySuccess: '✅ Verified! You can now chat with the owner. Your messages will be relayed, please wait for a reply.',
     verifyWaitingHint: '👆 Please tap the number button on the question above.',
