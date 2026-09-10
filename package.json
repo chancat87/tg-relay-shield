@@ -1,6 +1,6 @@
 {
   "name": "tg-relay-shield",
-  "version": "2.4.0",
+  "version": "2.5.0",
   "description": "High-performance Telegram Relay & Anti-Spam Bot deployed serverless on Cloudflare Workers",
   "main": "worker.js",
   "type": "module",

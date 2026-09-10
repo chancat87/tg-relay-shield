@@ -31,25 +31,23 @@ Many people use Telegram bots as public contact points (a privacy relay between 
 ## ✨ Key Features
 
 * 🚀 **100% Serverless & Free**: No VPS or Docker required. Runs seamlessly within Cloudflare Workers' generous free tier.
-* 🧠 **Infinite Dynamic Arithmetic Verification**:
-  * Real-time addition/subtraction problems ($A + B$ / $A - B$) with dynamically generated close distractors.
-  * Instant question refresh on wrong answers, eliminating brute-force scripts.
+* 🍓 **Visual Emoji Arithmetic (Standard Mode)**:
+  * Dynamic math problems using 16 clean, universal emojis (e.g. `🍎🍎 + 🍎🍎🍎 = ?`).
+  * Text contains **zero digits**, completely breaking naive regex scrapers. Options are **clean Arabic numbers** (`[ 5 ]`), allowing humans to solve in 0.5s without squinting.
+* 🛡️ **Instant Dual-Mode Defense (`/kqfy`)**:
+  * **Mode 1 (Standard)**: Fun Emoji visual counting verification. **Zero false positives on normal article/blog link discussions**.
+  * **Mode 2 (Ultimate)**: Official Cloudflare Turnstile Web Shield. Instantly block brute-force attacks via Cloudflare browser fingerprinting & TLS challenge.
+  * Switch via `/kqfy 1`, `/kqfy 2` or interactive 2-button panel.
+* 💬 **Visitor Quote & Reply Context Restoration**:
+  * Fixes the lost context issue in Telegram forwarding. When a visitor replies to a previous message, photo, or media, a preview summary is automatically prepended for the admin.
 * ⚡ **3-Strike Lockout (Anti-Spam DDoS)**:
   * 3 consecutive wrong answers triggers an instant 30-minute lockout.
   * **Zero KV Writes during lockout**, making it impossible for malicious scripts to deplete your Cloudflare KV write quotas.
-* 💬 **Visitor Quote & Reply Context Restoration**:
-  * Solves the lost reply bubble issue in Telegram forwarding. When a visitor replies to a previous message, image, or media, a preview summary is automatically prepended for the admin.
-* 🛡️ **Instant Defense Level Switching (`/kqfy`)**:
-  * **Level 1 (Standard)**: Dynamic addition/subtraction.
-  * **Level 2 (Strict)**: Chinese numerals + blocks external links/usernames in the first message.
-  * **Level 3 (Ultimate)**: High-sensitivity shield. Switch via `/kqfy 1|2|3` or interactive button panel.
 * 🌐 **100% Pure Bilingual Isolation & 1-Tap Switcher**:
   * Clean language isolation for English and Chinese users without mixed bilingual text.
   * Auto-detects client language with a seamless `[ 🌐 Switch Language ]` button right inside the verification keypad.
 * 🥷 **Silent Shadowbanning**:
   * Blocking someone via `/block` silences their messages without alerting them, removing the incentive to switch accounts.
-* 🚫 **Two-Layer Keyword Filtering**:
-  * Local and remote keyword lists. Messages containing ads or spam keywords are dropped before reaching you.
 * 🔒 **Complete Admin Anonymity**:
   * Supports replying even if the visitor has enabled "Hide Account on Forwarding". Your real Telegram identity remains 100% private.
 * 🛠️ **Scope-Based Isolated Command Menus**:
@@ -130,7 +128,7 @@ Execute these directly in your private chat with the bot:
 | Command | Usage | Description |
 | :--- | :--- | :--- |
 | **Reply to message** | Tap **Reply** on a forwarded message | Sends your reply directly to the guest (text, media, files) |
-| **`/kqfy`** | `/kqfy` or `/kqfy 1\|2\|3` | **Defense Level Hot-Switch**. Select level via command or interactive button panel |
+| **`/kqfy`** | `/kqfy` or `/kqfy 1\|2` | **Dual-Mode Defense Hot-Switch**. Select Mode 1 (Standard Emoji) or Mode 2 (Ultimate Web Shield) |
 | **`/block`** | Reply to message OR `/block <uid>` | **Silent Shadowban**. Silently drops all future messages from this user |
 | **`/unblock`** | Reply to message OR `/unblock <uid>` | Unblocks the user and clears any lockout count |
 | **`/addkw <word>`** | `/addkw crypto` | Adds a local keyword filter |
