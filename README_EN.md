@@ -38,11 +38,13 @@ Many people use Telegram bots as public contact points (a privacy relay between 
   * **Zero false positives on normal article/blog link discussions**.
 * 💬 **Native Bidirectional Quote Replies (Telegram API 7.0)**:
   * Powered by native Telegram Bot API 7.0 `reply_parameters`. Whether the admin replies to a visitor or a visitor quotes historical messages via native Telegram Reply, genuine quote bubbles are rendered flawlessly in both directions with zero fake text.
-* 🔕 **Flood-Free Notification Window (10-Min Cooldown)**:
-  * Solves the annoying notification flood where every incoming message triggers a "please wait for reply" notice. Implements a 10-minute session cooldown: only the first message receives an acknowledgment, while subsequent messages are forwarded silently for a clean chat experience.
-* ⚡ **3-Strike Lockout & 60s Re-verify Rate-Limiting**:
+* 🔕 **Flood-Free Silent Window (Aligned with 3-Hour Verified Session)**:
+  * Solves notification flooding by delivering the acknowledgment at the moment of verification. Throughout the 3-hour verified session, messages are relayed 100% silently with zero robotic interruptions.
+* ⚡ **3-Strike Lockout & 60s Sliding-Window Rate-Limiting**:
   * 3 consecutive wrong answers triggers an instant 30-minute lockout with zero KV writes to protect quotas.
-  * Verified users no longer see an inline re-verify button, and the `/reset` command is protected by a 60-second cooldown, completely eliminating automated script attack vectors.
+  * Visitor message rate is limited to 20 msgs/min with zero-KV-write overflow protection to prevent flood attacks and avoid Telegram 429 penalties.
+* 🛡️ **Complete Removal of /reset Attack Vector**:
+  * Fully removed `/reset` command and re-verify buttons for visitors. Verified guests cannot be forced into re-verification by malicious scripts.
 * 🌐 **100% Pure Bilingual Isolation & 1-Tap Switcher**:
   * Clean language isolation for English and Chinese users without mixed bilingual text.
   * Auto-detects client language with a seamless `[ 🌐 Switch Language ]` button right inside the verification keypad.
@@ -50,8 +52,8 @@ Many people use Telegram bots as public contact points (a privacy relay between 
   * Blocking someone via `/block` silences their messages without alerting them, removing the incentive to switch accounts.
 * 🔒 **Complete Admin Anonymity**:
   * Supports replying even if the visitor has enabled "Hide Account on Forwarding". Your real Telegram identity remains 100% private.
-* 🛠️ **Scope-Based Isolated Command Menus**:
-  * Configures separate command menus for visitors (`/start`, `/reset`, `/about`) and admins (`/block`, `/unblock`, `/addkw`, `/delkw`, `/listkw`, `/help`, `/about`).
+* 🛠️ **Minimalist Scope-Based Command Menus**:
+  * Configures clean menus for visitors (only `/start` and `/about`) and full management commands for admins.
 
 ---
 

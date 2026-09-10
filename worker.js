@@ -41,7 +41,7 @@ function getIntEnv(env, name, def, fallbackName = null) {
   return Number.isFinite(v) && v > 0 ? v : def;
 }
 
-const BOT_VERSION = '3.2.0-Shield';
+const BOT_VERSION = '3.3.0-Shield';
 
 function getBeijingTimeStr() {
   const d = new Date(Date.now() + 8 * 3600 * 1000);
@@ -428,33 +428,6 @@ class BotCore {
       return;
     }
 
-    // 3. /reset 重置会话与人机验证（访客防刷频控：60 秒冷却）
-    if (text === '/reset' && !isAdmin) {
-      const resetCdKey = `reset-cd:${chatId}`;
-      const lastReset = await this.kv.get(resetCdKey);
-      if (lastReset) {
-        const elapsed = Math.floor((Date.now() - parseInt(lastReset, 10)) / 1000);
-        const rem = Math.max(1, 60 - elapsed);
-        await this.api('sendMessage', {
-          chat_id: chatId,
-          text: t(lang, 'resetCooldown', { sec: rem })
-        });
-        return;
-      }
-
-      await this.kv.put(resetCdKey, String(Date.now()), { expirationTtl: 60 });
-      const newSessionId = Math.random().toString(36).slice(2, 10);
-      await this.kv.put(`session:${chatId}`, JSON.stringify({ sid: newSessionId, at: Date.now() }), { expirationTtl: 30 * 86400 });
-      await this.kv.delete(`verify:${chatId}`);
-      await this.kv.delete(`notify-cd:${chatId}`);
-      await this.api('sendMessage', {
-        chat_id: chatId,
-        text: t(lang, 'reverifyPrompt')
-      });
-      await this.issueQuestion(chatId, lang, newSessionId, 0);
-      return;
-    }
-
     if (isAdmin) {
       await this.handleAdminMessage(msg, lang);
       return;
@@ -758,31 +731,13 @@ class BotCore {
       return;
     }
 
-    // 2. 访客点击重新出题 (兼容历史旧消息按键，施加 60 秒防刷冷却)
+    // 2. 兼容历史旧消息按键：彻底废除重新出题，防止任何刷题滥用
     if (data === 'force_reverify') {
-      const resetCdKey = `reset-cd:${userId}`;
-      const lastReset = await this.kv.get(resetCdKey);
-      if (lastReset) {
-        const elapsed = Math.floor((Date.now() - parseInt(lastReset, 10)) / 1000);
-        const rem = Math.max(1, 60 - elapsed);
-        await this.api('answerCallbackQuery', {
-          callback_query_id: cbq.id,
-          text: t(lang, 'resetCooldown', { sec: rem }),
-          show_alert: true
-        });
-        return;
-      }
-
-      await this.kv.put(resetCdKey, String(Date.now()), { expirationTtl: 60 });
       await this.api('answerCallbackQuery', {
         callback_query_id: cbq.id,
-        text: t(lang, 'reverifyNotice')
+        text: '该功能已下线，请直接发送消息与主人沟通。',
+        show_alert: true
       });
-      const newSessionId = Math.random().toString(36).slice(2, 10);
-      await this.kv.put(`session:${userId}`, JSON.stringify({ sid: newSessionId, at: Date.now() }), { expirationTtl: 30 * 86400 });
-      await this.kv.delete(`verify:${userId}`);
-      await this.kv.delete(`notify-cd:${userId}`);
-      await this.issueQuestion(userId, lang, newSessionId, 0);
       return;
     }
 
@@ -917,7 +872,6 @@ class BotCore {
   async setupCommands() {
     const guestCommands = [
       { command: 'start', description: '启动会话 / 留言咨询' },
-      { command: 'reset', description: '重新验证 / 重置会话' },
       { command: 'about', description: '关于' }
     ];
     await this.api('setMyCommands', { commands: guestCommands, scope: { type: 'default' } });

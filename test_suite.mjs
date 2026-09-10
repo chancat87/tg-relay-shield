@@ -249,16 +249,17 @@ async function testBilingualSwitch() {
   console.log('✓ Passed: 纯双语隔离无串味，一键切换秒级重绘。');
 }
 
-// --- Test 6: 已验证状态下 /start 友好提示与 /reset 重新获取验证 (防刷频控) ---
+// --- Test 6: 已验证状态下安全闭环，彻底废除 /reset 与重新出题漏洞 ---
 async function testStartAndReverify() {
-  console.log('--- Test 6: 已验证状态下 /start 友好提示与 /reset 重新获取验证 (防刷频控) ---');
-  const { bot, env, sentMessages, callbacksAnswered } = await createTestBot();
+  console.log('--- Test 6: 已验证状态下安全闭环，彻底废除 /reset 与重新出题漏洞 ---');
+  const { bot, env, sentMessages, forwardedMessages, callbacksAnswered } = await createTestBot();
   const guestChatId = 66666;
   const now = Date.now();
 
   // 模拟用户刚刚验证通过
   await env.nfd.put(`session:${guestChatId}`, JSON.stringify({ sid: 'sess_66', at: now }));
   await env.nfd.put(`verify:${guestChatId}`, JSON.stringify({ verified: true, verifiedAt: now }));
+  await env.nfd.put(`notify-cd:${guestChatId}`, '1');
 
   // 1. 已验证访客发送 /start：告知已验证，彻底移除常驻重测按键，从源头切断脚本攻击面
   await bot.onMessage({ chat: { id: guestChatId }, from: { id: guestChatId, language_code: 'zh' }, text: '/start' });
@@ -266,19 +267,14 @@ async function testStartAndReverify() {
   assert(lastMsg.text.includes('安全验证有效期内'), '必须提示已处于安全验证有效期内');
   assert(!lastMsg.reply_markup, '生产环境安全收敛：已验证访客主界面严禁提供常驻重新验证按键');
 
-  // 2. 访客首次发送 /reset：重置会话并立即出题
+  // 2. 访客发送 /reset：彻底废除该命令，系统绝不再重置会话、绝不再出题，仅作为普通文本正常转发！
+  const fwdCountBefore = forwardedMessages.length;
   await bot.onMessage({ chat: { id: guestChatId }, from: { id: guestChatId, language_code: 'zh' }, text: '/reset' });
-  const reverifyMsg = sentMessages[sentMessages.length - 1];
-  assert(reverifyMsg.reply_markup?.inline_keyboard, '重置后必须立即生成新验证');
+  assert.strictEqual(forwardedMessages.length, fwdCountBefore + 1, '/reset 已被剥夺特殊指令权限，仅作为普通消息文本处理');
   const vstate = await env.nfd.get(`verify:${guestChatId}`, { type: 'json' });
-  assert(!vstate.verified, '验证状态必须被重置为未通过');
+  assert.strictEqual(vstate.verified, true, '验证状态绝不能被 /reset 破坏或重置');
 
-  // 3. 恶意脚本或连击：在 60 秒冷却期内再次调用 /reset，必须被频控直接拦截
-  await bot.onMessage({ chat: { id: guestChatId }, from: { id: guestChatId, language_code: 'zh' }, text: '/reset' });
-  const rateLimitMsg = sentMessages[sentMessages.length - 1];
-  assert(rateLimitMsg.text.includes('操作过于频繁'), '60 秒内连续 /reset 必须触发频控提示');
-
-  // 4. 恶意脚本针对历史残留 force_reverify callback 连点，必须受频控拦截
+  // 3. 针对历史旧消息残留按键 force_reverify，点击直接提示已下线，零出题零写 KV
   await bot.onCallbackQuery({
     id: 'cb_spam_reverify',
     data: 'force_reverify',
@@ -286,9 +282,9 @@ async function testStartAndReverify() {
     message: { chat: { id: guestChatId }, message_id: 888 }
   });
   const lastToast = callbacksAnswered[callbacksAnswered.length - 1];
-  assert(lastToast.text.includes('操作过于频繁'), '历史消息中的 force_reverify 也必须被频控拦截');
+  assert(lastToast.text.includes('已下线'), '历史按键必须明确告知已下线');
 
-  console.log('✓ Passed: /start 安全收敛，/reset 与历史按键 60 秒冷却防刷屏防脚本机制完美生效。');
+  console.log('✓ Passed: /reset 指令与重新验证漏洞已彻底拔除，防刷安全坚不可摧。');
 }
 
 // --- Test 7: 连续答错 3 次自动熔断锁定 (Anti-DDoS 零写保护) ---
@@ -400,10 +396,12 @@ async function testMenuSimplification() {
 
   await bot.setupCommands();
   assert(registeredGuestCommands && registeredGuestCommands.length > 0, '必须注册访客默认指令');
+  assert.strictEqual(registeredGuestCommands.length, 2, '访客端命令必须仅有 2 项，彻底移除 /reset');
+  assert(!registeredGuestCommands.find(c => c.command === 'reset'), '访客菜单严禁包含 /reset 指令');
   const lastCmd = registeredGuestCommands[registeredGuestCommands.length - 1];
   assert.strictEqual(lastCmd.command, 'about', '最后一行必须是 /about');
   assert.strictEqual(lastCmd.description, '关于', '最后一行描述必须严格为 "关于"，简单明了');
-  console.log('✓ Passed: 菜单最后一行已精简为 "关于"，简单明了。');
+  console.log('✓ Passed: 菜单彻底移除 /reset，仅保留 /start 与 /about，简单明了。');
 }
 
 // --- Test 11: 对话发言频率限制与超限零写保护 (Anti-Flood & Rate Limiting) ---
@@ -457,7 +455,7 @@ async function main() {
   await testKeywordFiltering();
   await testMenuSimplification();
   await testRateLimitingAndQuotaProtection();
-  console.log('\n🌟 ALL 11 PRODUCTION TEST SUITES PASSED PERFECTLY (v3.2.0-Shield)!');
+  console.log('\n🌟 ALL 11 PRODUCTION TEST SUITES PASSED PERFECTLY (v3.3.0-Shield)!');
 }
 
 main().catch(err => {
