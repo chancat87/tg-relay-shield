@@ -36,11 +36,13 @@ Many people use Telegram bots as public contact points (a privacy relay between 
   * Dynamic math problems using 16 clean, universal emojis (e.g. `🍎🍎 + 🍎🍎🍎 = ?`).
   * Text contains **zero digits**, completely breaking naive regex scrapers. Options are **clean Arabic numbers** (`[ 5 ]`), allowing humans to solve in 0.5s without squinting.
   * **Zero false positives on normal article/blog link discussions**.
-* 💬 **Visitor Quote & Reply Context Restoration**:
-  * Fixes the lost context issue in Telegram forwarding. When a visitor replies to a previous message, photo, or media, a preview summary is automatically prepended for the admin.
-* ⚡ **3-Strike Lockout (Anti-Spam DDoS)**:
-  * 3 consecutive wrong answers triggers an instant 30-minute lockout.
-  * **Zero KV Writes during lockout**, making it impossible for malicious scripts to deplete your Cloudflare KV write quotas.
+* 💬 **Native Bidirectional Quote Replies (Telegram API 7.0)**:
+  * Powered by native Telegram Bot API 7.0 `reply_parameters`. Whether the admin replies to a visitor or a visitor quotes historical messages via native Telegram Reply, genuine quote bubbles are rendered flawlessly in both directions with zero fake text.
+* 🔕 **Flood-Free Notification Window (10-Min Cooldown)**:
+  * Solves the annoying notification flood where every incoming message triggers a "please wait for reply" notice. Implements a 10-minute session cooldown: only the first message receives an acknowledgment, while subsequent messages are forwarded silently for a clean chat experience.
+* ⚡ **3-Strike Lockout & 60s Re-verify Rate-Limiting**:
+  * 3 consecutive wrong answers triggers an instant 30-minute lockout with zero KV writes to protect quotas.
+  * Verified users no longer see an inline re-verify button, and the `/reset` command is protected by a 60-second cooldown, completely eliminating automated script attack vectors.
 * 🌐 **100% Pure Bilingual Isolation & 1-Tap Switcher**:
   * Clean language isolation for English and Chinese users without mixed bilingual text.
   * Auto-detects client language with a seamless `[ 🌐 Switch Language ]` button right inside the verification keypad.

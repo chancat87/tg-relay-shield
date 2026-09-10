@@ -41,7 +41,7 @@ function getIntEnv(env, name, def, fallbackName = null) {
   return Number.isFinite(v) && v > 0 ? v : def;
 }
 
-const BOT_VERSION = '3.0.0-Shield';
+const BOT_VERSION = '3.1.0-Shield';
 
 function getBeijingTimeStr() {
   const d = new Date(Date.now() + 8 * 3600 * 1000);
@@ -151,10 +151,11 @@ const I18N = {
     notifyWaiting: '🔔 您的消息已转发给主人，请耐心等待回复。',
     keywordBlocked: '⚠️ 您的消息包含被拦截的敏感内容，未予转交。',
     rateLimited: '⏳ 发送频率过快，请稍后再试。',
-    guestVerifiedStart: '👋 您好！我是私聊中转助手。\n\n您已通过人机安全验证，可以直接在此发送文字、图片、语音或文件，我会帮您安全转达给主人。\n\n💡 若您想重新获取验证题进行测试，请点击下方按钮：',
+    guestVerifiedStart: '👋 您好！我是私聊中转助手。\n\n您已通过人机安全验证，可以直接在此发送文字、图片、语音或文件，我会帮您安全转达给主人。',
     reverifyBtn: '🔄 重新验证 / 重新出题',
     reverifyNotice: '正在为您生成新验证...',
     reverifyPrompt: '🔄 会话与验证状态已重置，请完成以下验证：',
+    resetCooldown: '⏳ 操作过于频繁，请在 {sec} 秒后再试。',
     langSwitched: '✅ 语言已切换为简体中文',
     switchLangBtn: '🌐 Switch to English'
   },
@@ -178,10 +179,11 @@ const I18N = {
     notifyWaiting: '🔔 Your message has been forwarded. Please wait for a reply.',
     keywordBlocked: '⚠️ Your message contained blocked keywords and was dropped.',
     rateLimited: '⏳ You are sending too fast. Please wait a moment.',
-    guestVerifiedStart: "👋 Hello! I am the contact relay assistant.\n\nYou have already passed verification! Feel free to send text, photos, files, or voice messages here and I will relay them to the owner.\n\n💡 If you want to re-verify for testing, please tap below:",
+    guestVerifiedStart: "👋 Hello! I am the contact relay assistant.\n\nYou have already passed verification! Feel free to send text, photos, files, or voice messages here and I will relay them to the owner.",
     reverifyBtn: '🔄 Re-verify / New Challenge',
     reverifyNotice: 'Generating new challenge...',
     reverifyPrompt: '🔄 Session and verification reset. Please complete verification:',
+    resetCooldown: '⏳ Too many requests. Please wait {sec} second(s).',
     langSwitched: '✅ Language switched to English',
     switchLangBtn: '🌐 切换为简体中文'
   }
@@ -222,6 +224,7 @@ class BotCore {
     this.verifiedTtlSeconds = getIntEnv(env, 'VERIFIED_TTL_SECONDS', 3 * 3600);
     this.rateLimitCount = getIntEnv(env, 'RATE_LIMIT_MESSAGE', 45);
     this.rateLimitWindow = getIntEnv(env, 'RATE_LIMIT_WINDOW_SECONDS', 60);
+    this.notifyCooldownSeconds = getIntEnv(env, 'NOTIFY_COOLDOWN_SECONDS', 10 * 60); // 10 分钟静默窗口防刷屏
 
     this.maxFailAttempts = 3;
     this.lockoutDurationMs = 30 * 60 * 1000;
@@ -401,15 +404,10 @@ class BotCore {
         // 检查用户是否已验证过
         const isVerified = vstate && vstate.verified && (Date.now() - vstate.verifiedAt < this.verifiedTtlSeconds * 1000);
         if (isVerified) {
-          const keyboard = {
-            inline_keyboard: [
-              [{ text: t(lang, 'reverifyBtn'), callback_data: 'force_reverify' }]
-            ]
-          };
+          // 生产环境安全加固：已验证访客直接提示正常沟通，不再在主界面暴露常驻重新验证按钮，从根源杜绝恶意脚本刷题
           await this.api('sendMessage', {
             chat_id: chatId,
-            text: t(lang, 'guestVerifiedStart'),
-            reply_markup: keyboard
+            text: t(lang, 'guestVerifiedStart')
           });
           return;
         }
@@ -425,8 +423,21 @@ class BotCore {
       return;
     }
 
-    // 3. /reset 重置会话与人机验证（访客与测试快捷指令）
+    // 3. /reset 重置会话与人机验证（访客防刷频控：60 秒冷却）
     if (text === '/reset' && !isAdmin) {
+      const resetCdKey = `reset-cd:${chatId}`;
+      const lastReset = await this.kv.get(resetCdKey);
+      if (lastReset) {
+        const elapsed = Math.floor((Date.now() - parseInt(lastReset, 10)) / 1000);
+        const rem = Math.max(1, 60 - elapsed);
+        await this.api('sendMessage', {
+          chat_id: chatId,
+          text: t(lang, 'resetCooldown', { sec: rem })
+        });
+        return;
+      }
+
+      await this.kv.put(resetCdKey, String(Date.now()), { expirationTtl: 60 });
       const newSessionId = Math.random().toString(36).slice(2, 10);
       await this.kv.put(`session:${chatId}`, JSON.stringify({ sid: newSessionId, at: Date.now() }), { expirationTtl: 30 * 86400 });
       await this.kv.delete(`verify:${chatId}`);
@@ -685,8 +696,14 @@ class BotCore {
       // 记录双向映射（保留 14 天）
       await this.kv.put(`msg-map-${adminFwdMsgId}`, JSON.stringify({ uid: String(chatId), guestMsgId: msg.message_id }), { expirationTtl: 14 * 86400 });
       await this.kv.put(`guest-to-admin:${msg.message_id}`, String(adminFwdMsgId), { expirationTtl: 14 * 86400 });
-      // 给访客温馨提示已送达
-      await this.api('sendMessage', { chat_id: chatId, text: t(lang, 'notifyWaiting') });
+      
+      // 消息送达提示：实施 10 分钟静默冷却窗口，单窗口期内仅首条发送提示，杜绝连续发信重复刷屏
+      const notifyKey = `notify-cd:${chatId}`;
+      const hasNotified = await this.kv.get(notifyKey);
+      if (!hasNotified) {
+        await this.kv.put(notifyKey, '1', { expirationTtl: this.notifyCooldownSeconds });
+        await this.api('sendMessage', { chat_id: chatId, text: t(lang, 'notifyWaiting') });
+      }
     } else {
       await this.api('sendMessage', { chat_id: chatId, text: t(lang, 'forwardFail') });
     }
@@ -734,8 +751,22 @@ class BotCore {
       return;
     }
 
-    // 2. 访客点击重新出题 (force_reverify)
+    // 2. 访客点击重新出题 (兼容历史旧消息按键，施加 60 秒防刷冷却)
     if (data === 'force_reverify') {
+      const resetCdKey = `reset-cd:${userId}`;
+      const lastReset = await this.kv.get(resetCdKey);
+      if (lastReset) {
+        const elapsed = Math.floor((Date.now() - parseInt(lastReset, 10)) / 1000);
+        const rem = Math.max(1, 60 - elapsed);
+        await this.api('answerCallbackQuery', {
+          callback_query_id: cbq.id,
+          text: t(lang, 'resetCooldown', { sec: rem }),
+          show_alert: true
+        });
+        return;
+      }
+
+      await this.kv.put(resetCdKey, String(Date.now()), { expirationTtl: 60 });
       await this.api('answerCallbackQuery', {
         callback_query_id: cbq.id,
         text: t(lang, 'reverifyNotice')
@@ -877,13 +908,13 @@ class BotCore {
     const guestCommands = [
       { command: 'start', description: '启动会话 / 留言咨询' },
       { command: 'reset', description: '重新验证 / 重置会话' },
-      { command: 'about', description: '关于本机器人 (客服中继介绍)' }
+      { command: 'about', description: '关于' }
     ];
     await this.api('setMyCommands', { commands: guestCommands, scope: { type: 'default' } });
 
     const adminCommands = [
       { command: 'help', description: '📖 查看管理指令手册' },
-      { command: 'about', description: 'ℹ️ 系统运行与防御状态' },
+      { command: 'about', description: '关于' },
       { command: 'block', description: '🥷 静默拉黑 (回复某条消息或输入UID)' },
       { command: 'unblock', description: '🕊️ 解除对访客的拉黑' },
       { command: 'addkw', description: '➕ 添加敏感拦截词' },

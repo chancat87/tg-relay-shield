@@ -117,7 +117,11 @@ async function testQuoteReplyContext() {
   assert(guestReplyCopy, '访客的引用回复必须以 copyMessage + reply_parameters 转发给管理员');
   assert.strictEqual(guestReplyCopy.chat_id, String(adminChatId));
   assert.strictEqual(guestReplyCopy.reply_parameters?.message_id, 600, '必须精准引用管理员的原消息 ID 600');
-  console.log('✓ Passed: 双向原生引用回复 (Native Quote Reply) 完美镜像打通，零多余虚假文本。');
+
+  // 6. 断言：10 分钟静默冷却窗口生效，访客发了两条消息（50 和 51），但只收到了 1 条 "已转发给主人" 的通知
+  const waitingNotices = sentMessages.filter(m => m.chat_id === guestChatId && m.text && m.text.includes('已转发给主人'));
+  assert.strictEqual(waitingNotices.length, 1, '10 分钟静默冷却窗口生效：连续发信时仅首条提示，杜绝重复刷屏');
+  console.log('✓ Passed: 双向原生引用回复与发信通知防刷静默窗口完美生效。');
 }
 
 // --- Test 2: 标准模式 Emoji 动态视觉算术题目 ---
@@ -244,10 +248,10 @@ async function testBilingualSwitch() {
   console.log('✓ Passed: 纯双语隔离无串味，一键切换秒级重绘。');
 }
 
-// --- Test 6: 已验证状态下 /start 友好提示与 /reset 重新获取验证 ---
+// --- Test 6: 已验证状态下 /start 友好提示与 /reset 重新获取验证 (防刷频控) ---
 async function testStartAndReverify() {
-  console.log('--- Test 6: 已验证状态下 /start 友好提示与 /reset 重新获取验证 ---');
-  const { bot, env, sentMessages } = await createTestBot();
+  console.log('--- Test 6: 已验证状态下 /start 友好提示与 /reset 重新获取验证 (防刷频控) ---');
+  const { bot, env, sentMessages, callbacksAnswered } = await createTestBot();
   const guestChatId = 66666;
   const now = Date.now();
 
@@ -255,20 +259,35 @@ async function testStartAndReverify() {
   await env.nfd.put(`session:${guestChatId}`, JSON.stringify({ sid: 'sess_66', at: now }));
   await env.nfd.put(`verify:${guestChatId}`, JSON.stringify({ verified: true, verifiedAt: now }));
 
-  // 1. 已验证访客发送 /start：告知已验证并附带重测按钮
+  // 1. 已验证访客发送 /start：告知已验证，彻底移除常驻重测按键，从源头切断脚本攻击面
   await bot.onMessage({ chat: { id: guestChatId }, from: { id: guestChatId, language_code: 'zh' }, text: '/start' });
   let lastMsg = sentMessages[sentMessages.length - 1];
   assert(lastMsg.text.includes('已通过人机安全验证'), '必须提示已验证');
-  assert(lastMsg.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data === 'force_reverify', '必须提供重新验证按键供测试');
+  assert(!lastMsg.reply_markup, '生产环境安全收敛：已验证访客主界面严禁提供常驻重新验证按键');
 
-  // 2. 访客发送 /reset：会话清空并立即重新出题
+  // 2. 访客首次发送 /reset：重置会话并立即出题
   await bot.onMessage({ chat: { id: guestChatId }, from: { id: guestChatId, language_code: 'zh' }, text: '/reset' });
   const reverifyMsg = sentMessages[sentMessages.length - 1];
   assert(reverifyMsg.reply_markup?.inline_keyboard, '重置后必须立即生成新验证');
   const vstate = await env.nfd.get(`verify:${guestChatId}`, { type: 'json' });
   assert(!vstate.verified, '验证状态必须被重置为未通过');
 
-  console.log('✓ Passed: /start 已验证提示与 /reset 重新验证逻辑严密流畅。');
+  // 3. 恶意脚本或连击：在 60 秒冷却期内再次调用 /reset，必须被频控直接拦截
+  await bot.onMessage({ chat: { id: guestChatId }, from: { id: guestChatId, language_code: 'zh' }, text: '/reset' });
+  const rateLimitMsg = sentMessages[sentMessages.length - 1];
+  assert(rateLimitMsg.text.includes('操作过于频繁'), '60 秒内连续 /reset 必须触发频控提示');
+
+  // 4. 恶意脚本针对历史残留 force_reverify callback 连点，必须受频控拦截
+  await bot.onCallbackQuery({
+    id: 'cb_spam_reverify',
+    data: 'force_reverify',
+    from: { id: guestChatId, language_code: 'zh' },
+    message: { chat: { id: guestChatId }, message_id: 888 }
+  });
+  const lastToast = callbacksAnswered[callbacksAnswered.length - 1];
+  assert(lastToast.text.includes('操作过于频繁'), '历史消息中的 force_reverify 也必须被频控拦截');
+
+  console.log('✓ Passed: /start 安全收敛，/reset 与历史按键 60 秒冷却防刷屏防脚本机制完美生效。');
 }
 
 // --- Test 7: 连续答错 3 次自动熔断锁定 (Anti-DDoS 零写保护) ---
@@ -366,6 +385,26 @@ async function testKeywordFiltering() {
   console.log('✓ Passed: 敏感词动态过滤系统运转精准无误。');
 }
 
+// --- Test 10: 菜单精简（最后一行严格为 "关于"）---
+async function testMenuSimplification() {
+  console.log('--- Test 10: 菜单精简（最后一行严格为 "关于"）---');
+  const { bot } = await createTestBot();
+  let registeredGuestCommands = null;
+  bot.api = async function(method, body) {
+    if (method === 'setMyCommands' && body.scope?.type === 'default') {
+      registeredGuestCommands = body.commands;
+    }
+    return { ok: true };
+  };
+
+  await bot.setupCommands();
+  assert(registeredGuestCommands && registeredGuestCommands.length > 0, '必须注册访客默认指令');
+  const lastCmd = registeredGuestCommands[registeredGuestCommands.length - 1];
+  assert.strictEqual(lastCmd.command, 'about', '最后一行必须是 /about');
+  assert.strictEqual(lastCmd.description, '关于', '最后一行描述必须严格为 "关于"，简单明了');
+  console.log('✓ Passed: 菜单最后一行已精简为 "关于"，简单明了。');
+}
+
 async function main() {
   await testQuoteReplyContext();
   await testEmojiDynamicQuestion();
@@ -376,7 +415,8 @@ async function main() {
   await testLockoutAfterThreeFails();
   await testAdminShadowban();
   await testKeywordFiltering();
-  console.log('\n🌟 ALL 9 PRODUCTION TEST SUITES PASSED PERFECTLY (v3.0.0-Shield)!');
+  await testMenuSimplification();
+  console.log('\n🌟 ALL 10 PRODUCTION TEST SUITES PASSED PERFECTLY (v3.1.0-Shield)!');
 }
 
 main().catch(err => {
