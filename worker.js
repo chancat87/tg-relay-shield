@@ -3,7 +3,7 @@
  * 
  * GitHub: https://github.com/your-username/tg-relay-shield
  * License: MIT
- * Version: 2.5.0-Shield (Production Ready)
+ * Version: 2.6.0-Shield (Production Ready)
  * 
  * 核心架构特性：
  * 1. 趣味 Emoji 动态视觉算术：
@@ -43,7 +43,18 @@ function getIntEnv(env, name, def, fallbackName = null) {
   return Number.isFinite(v) && v > 0 ? v : def;
 }
 
-const BOT_VERSION = '2.5.0-Shield';
+const BOT_VERSION = '2.6.0-Shield';
+
+function getBeijingTimeStr() {
+  const d = new Date(Date.now() + 8 * 3600 * 1000);
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  const hh = String(d.getUTCHours()).padStart(2, '0');
+  const mm = String(d.getUTCMinutes()).padStart(2, '0');
+  const ss = String(d.getUTCSeconds()).padStart(2, '0');
+  return `${y}-${m}-${day} ${hh}:${mm}:${ss} (北京时间 / UTC+8)`;
+}
 
 function escapeHtml(s) {
   return String(s || '').replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
@@ -370,6 +381,35 @@ class BotCore {
     return { inline_keyboard: keyboard };
   }
 
+  // --- 访客验证状态获取（含跨地域 KV 缓存穿透实时校验机制） ---
+  async getVerificationState(chatId) {
+    let vstate = await this.kv.get(`verify:${chatId}`, { type: 'json' }).catch(() => null);
+
+    // 如果状态已显示通过且在有效期内，直接返回
+    const isVerified = vstate && vstate.verified && (Date.now() - vstate.verifiedAt < this.verifiedTtlSeconds * 1000);
+    if (isVerified) {
+      return vstate;
+    }
+
+    // 跨地域 KV 边缘节点缓存一致性兜底：
+    // 当访客在手机端（中国/亚洲 POP）完成网页 Turnstile 验证后，写入中央存储；
+    // 但欧洲 Telegram Webhook 节点的 verify:${chatId} 可能仍残留未通过的旧边缘缓存（KV 缓存长达 60 秒）。
+    // ticket:${ticket} 是该次出题生成的唯一随机票据，欧洲边缘节点此前从未 GET 读取过它（绝无边缘缓存）。
+    // 首次读取 ticket:tk_xxx 将触发边缘 Cache Miss 并直达全球权威存储。
+    if (vstate && vstate.questionId && vstate.questionId.startsWith('tk_')) {
+      const ticketStatus = await this.kv.get(`ticket:${vstate.questionId}`).catch(() => null);
+      if (ticketStatus === 'PASSED') {
+        vstate.verified = true;
+        vstate.verifiedAt = Date.now();
+        // 回写当前边缘节点，立即刷新本地缓存
+        await this.kv.put(`verify:${chatId}`, JSON.stringify(vstate), { expirationTtl: this.verifiedTtlSeconds }).catch(() => {});
+        return vstate;
+      }
+    }
+
+    return vstate;
+  }
+
   // --- 发送新题目（根据防御模式分流） ---
   async issueQuestion(chatId, lang, sessionId, failCount = 0, hostname = '') {
     const shieldLevel = await this.getShieldLevel();
@@ -470,7 +510,7 @@ class BotCore {
         await this.api('sendMessage', { chat_id: chatId, text: t(lang, 'adminStart') });
       } else {
         const sess = await this.kv.get(`session:${chatId}`, { type: 'json' }).catch(() => null);
-        const vstate = await this.kv.get(`verify:${chatId}`, { type: 'json' }).catch(() => null);
+        const vstate = await this.getVerificationState(chatId);
 
         // 检查熔断锁定
         if (vstate && vstate.lockedUntil && Date.now() < vstate.lockedUntil) {
@@ -692,7 +732,7 @@ class BotCore {
     }
 
     // 3. 熔断锁死与验证状态检查
-    const vstate = await this.kv.get(`verify:${chatId}`, { type: 'json' }).catch(() => null);
+    const vstate = await this.getVerificationState(chatId);
     if (vstate && vstate.lockedUntil && Date.now() < vstate.lockedUntil) {
       const waitMin = Math.ceil((vstate.lockedUntil - Date.now()) / 60000);
       await this.api('sendMessage', {
@@ -1192,8 +1232,8 @@ async function handleHttp(request, env, ctx) {
       }
 
       const uid = await bot.kv.get(`ticket:${ticket}`);
-      if (!uid) {
-        return new Response(JSON.stringify({ ok: false, error: '验证票据已过期，请重新点击获取' }), { status: 400 });
+      if (!uid || uid === 'PASSED') {
+        return new Response(JSON.stringify({ ok: false, error: '验证票据已过期或已被使用，请重新在 Telegram 中点击获取' }), { status: 400 });
       }
 
       if (!cf_token) {
@@ -1217,8 +1257,8 @@ async function handleHttp(request, env, ctx) {
         } catch (_) {}
       }
 
-      // 验证通过：在 KV 中解锁该访客并清空 ticket
-      await bot.kv.delete(`ticket:${ticket}`);
+      // 验证通过：标记该 ticket 为 PASSED (保留 1 小时供边缘跨地域节点即时识别，并防重放攻击)
+      await bot.kv.put(`ticket:${ticket}`, 'PASSED', { expirationTtl: 3600 });
       const state = {
         sessionId: Math.random().toString(36).slice(2, 10),
         questionId: 'web-verified',
@@ -1319,7 +1359,7 @@ async function handleHttp(request, env, ctx) {
       </div>
       <div class="meta-item">
         <span class="meta-label">查询时间</span>
-        <span class="meta-value">${new Date().toISOString().replace('T', ' ').slice(0, 19)} UTC</span>
+        <span class="meta-value">${getBeijingTimeStr()}</span>
       </div>
     </div>
     <div class="footer">
@@ -1336,7 +1376,7 @@ async function handleHttp(request, env, ctx) {
     });
   }
 
-  return new Response(`Telegram Relay Bot is Running! (${BOT_VERSION})\nDefense Level: ${currentModeName}\n`, {
+  return new Response(`Telegram Relay Bot is Running! (${BOT_VERSION})\nDefense Level: ${currentModeName}\nTime: ${getBeijingTimeStr()}\n`, {
     headers: {
       'Content-Type': 'text/plain; charset=utf-8',
       ...noCacheHeaders

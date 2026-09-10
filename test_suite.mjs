@@ -263,6 +263,56 @@ async function testUltimateModeWaitingHintAndSecret() {
   console.log('✓ Passed: 终极模式未验证发信精准引导与 Turnstile 密钥校验均完美通过。');
 }
 
+// --- Test 9: 终极模式跨地域 KV 缓存同步兜底机制 (零延迟即时通过) ---
+async function testCrossRegionKvDelay() {
+  console.log('--- Test 9: 终极模式跨地域 KV 缓存同步兜底机制 (零延迟即时通过) ---');
+  const { bot, env, sentMessages } = await createTestBot();
+  const guestChatId = 44444;
+
+  // 1. 设置为终极模式 2，并初始化出题
+  await env.nfd.put('config:shield_level', '2');
+  await env.nfd.put(`session:${guestChatId}`, JSON.stringify({ sid: 'sess_44', at: Date.now() }));
+  await bot.issueQuestion(guestChatId, 'zh', 'sess_44', 0, 'bot.example.com');
+
+  // 获取生成的 ticket
+  const verifyMsg = sentMessages[sentMessages.length - 1];
+  const urlObj = new URL(verifyMsg.reply_markup.inline_keyboard[0][0].web_app.url);
+  const ticket = urlObj.searchParams.get('t');
+
+  // 2. 模拟边缘节点旧缓存情况：
+  // 亚洲节点在 /verify/submit 验证通过，将 ticket 标记为 PASSED
+  await env.nfd.put(`ticket:${ticket}`, 'PASSED');
+  // 但欧洲 Telegram Webhook 节点的 verify:${guestChatId} 边缘缓存仍残留 verified: false 状态
+  await env.nfd.put(`verify:${guestChatId}`, JSON.stringify({
+    sessionId: 'sess_44',
+    questionId: ticket,
+    correctIndex: 0,
+    exp: Date.now() + 15 * 60 * 1000,
+    verified: false,
+    failCount: 0,
+    lockedUntil: 0
+  }));
+
+  sentMessages.length = 0;
+  // 3. 访客在 Telegram 中立即发信："我通过验证了真牛逼。"
+  await bot.handleGuestMessage({
+    chat: { id: guestChatId },
+    from: { id: guestChatId, language_code: 'zh' },
+    message_id: 205,
+    text: '我通过验证了真牛逼。'
+  }, 'zh', 'bot.example.com');
+
+  // 4. 断言：绝不能再次弹出高防安全验证提示，而是成功放行消息
+  const blockedMsg = sentMessages.find(m => m.chat_id === guestChatId && m.text && m.text.includes('高防安全验证'));
+  assert(!blockedMsg, '通过跨地域兜底机制后，绝严禁重复弹出验证按钮！');
+
+  // 5. 校验本地 KV 缓存已同步更新为 verified: true
+  const updatedState = await env.nfd.get(`verify:${guestChatId}`, { type: 'json' });
+  assert.strictEqual(updatedState.verified, true, '本地缓存状态必须被实时刷新为已验证通过');
+
+  console.log('✓ Passed: 终极模式跨地域 KV 缓存同步兜底机制运转完美，彻底杜绝验证死循环！');
+}
+
 async function main() {
   await testQuoteReplyContext();
   await testEmojiDynamicQuestion();
@@ -272,7 +322,8 @@ async function main() {
   await testBilingualSwitch();
   await testStartAndReverify();
   await testUltimateModeWaitingHintAndSecret();
-  console.log('\n🌟 ALL 8 PRODUCTION TEST SUITES PASSED PERFECTLY (v2.5.0)!');
+  await testCrossRegionKvDelay();
+  console.log('\n🌟 ALL 9 PRODUCTION TEST SUITES PASSED PERFECTLY (v2.6.0)!');
 }
 
 main().catch(err => {
