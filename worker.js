@@ -390,7 +390,14 @@ class BotCore {
           // 已在当前 3 小时周期内触发过，直接熔断静默，零发信零写 KV
           return;
         }
-        await this.kv.put(aboutLockKey, '1', { expirationTtl: this.verifiedTtlSeconds });
+        const vstate = await this.getVerificationState(chatId);
+        const isVerified = vstate && vstate.verified && (Date.now() - vstate.verifiedAt < this.verifiedTtlSeconds * 1000);
+        let lockTtl = this.verifiedTtlSeconds;
+        if (isVerified && vstate?.verifiedAt) {
+          const elapsed = Math.floor((Date.now() - vstate.verifiedAt) / 1000);
+          lockTtl = Math.max(60, this.verifiedTtlSeconds - elapsed);
+        }
+        await this.kv.put(aboutLockKey, '1', { expirationTtl: lockTtl });
         await this.api('sendMessage', { chat_id: chatId, text: t(lang, 'guestAbout'), parse_mode: 'HTML' });
       }
       return;
@@ -424,7 +431,9 @@ class BotCore {
             // 已在当前 3 小时周期内触发过，直接熔断静默，零发信零写 KV
             return;
           }
-          await this.kv.put(startLockKey, '1', { expirationTtl: this.verifiedTtlSeconds });
+          const elapsed = Math.floor((Date.now() - vstate.verifiedAt) / 1000);
+          const lockTtl = Math.max(60, this.verifiedTtlSeconds - elapsed);
+          await this.kv.put(startLockKey, '1', { expirationTtl: lockTtl });
           await this.api('sendMessage', {
             chat_id: chatId,
             text: t(lang, 'guestVerifiedStart')
@@ -834,6 +843,9 @@ class BotCore {
       await this.kv.put(`verify:${userId}`, JSON.stringify(vstate), { expirationTtl: this.verifiedTtlSeconds });
       // 验证通过时已明确提示，将等待通知的静默期与验证有效期（3 小时）完全对齐，会话期内后续发信 100% 静默转达
       await this.kv.put(`notify-cd:${userId}`, '1', { expirationTtl: this.verifiedTtlSeconds });
+      // 开启全新 3 小时会话周期：清空旧周期按键锁定，赋予新周期内 /start 与 /about 各自 1 次合法响应配额
+      await this.kv.delete(`cmd-lock:about:${userId}`);
+      await this.kv.delete(`cmd-lock:start:${userId}`);
       
       await this.api('answerCallbackQuery', { callback_query_id: cbq.id, text: '✅ OK' });
       await this.api('editMessageText', {

@@ -460,6 +460,100 @@ async function testRateLimitingAndQuotaProtection() {
   console.log('✓ Passed: 说话频率限制精准生效，有效抵御垃圾脚本灌水轰炸。');
 }
 
+// --- Test 12: 3 小时会话生命周期超时与二次验证闭环 (Session Expiration & Re-verification Loop) ---
+async function testThreeHourSessionExpirationAndReverify() {
+  console.log('--- Test 12: 3 小时会话生命周期超时与二次验证闭环 (Session Expiration & Re-verification Loop) ---');
+  const { bot, env, sentMessages, forwardedMessages } = await createTestBot();
+  const guestChatId = 334455;
+  const now = Date.now();
+
+  // 1. 初始化并在 T0 通过验证 (开始第 1 个 3 小时会话期)
+  await env.nfd.put(`session:${guestChatId}`, JSON.stringify({ sid: 'sess_expire', at: now }));
+  await env.nfd.put(`verify:${guestChatId}`, JSON.stringify({ verified: true, verifiedAt: now }));
+  await env.nfd.put(`notify-cd:${guestChatId}`, '1');
+
+  // 1.1 在 3 小时有效期内：点击 /about 响应 1 次，重复点击静默
+  await bot.onMessage({ chat: { id: guestChatId }, from: { id: guestChatId, language_code: 'zh' }, text: '/about' });
+  assert(sentMessages[sentMessages.length - 1].text.includes('关于此机器人'), '第 1 个周期内首次点击 /about 正常响应');
+  const countBeforeAboutSpam = sentMessages.length;
+  await bot.onMessage({ chat: { id: guestChatId }, from: { id: guestChatId, language_code: 'zh' }, text: '/about' });
+  assert.strictEqual(sentMessages.length, countBeforeAboutSpam, '第 1 个周期内重复点击 /about 必须熔断静默');
+
+  // 1.2 在 3 小时有效期内：点击 /start 响应 1 次，重复点击静默
+  await bot.onMessage({ chat: { id: guestChatId }, from: { id: guestChatId, language_code: 'zh' }, text: '/start' });
+  assert(sentMessages[sentMessages.length - 1].text.includes('安全验证有效期内'), '第 1 个周期内首次点击 /start 正常响应');
+  const countBeforeStartSpam = sentMessages.length;
+  await bot.onMessage({ chat: { id: guestChatId }, from: { id: guestChatId, language_code: 'zh' }, text: '/start' });
+  assert.strictEqual(sentMessages.length, countBeforeStartSpam, '第 1 个周期内重复点击 /start 必须熔断静默');
+
+  // 1.3 在 3 小时有效期内：发送消息直接转发，静默不扰民
+  await bot.handleGuestMessage({
+    chat: { id: guestChatId },
+    from: { id: guestChatId, language_code: 'zh' },
+    message_id: 1,
+    text: '第一周期内的消息'
+  }, 'zh');
+  assert.strictEqual(forwardedMessages.length, 1, '第 1 个周期内消息正常转发给管理员');
+
+  // 2. 模拟时光飞逝：跃迁至 3 小时又 1 秒后 (10,801 秒后)
+  const expiredTime = now - (3 * 3600 + 1) * 1000;
+  // 更新 verify 记录中的 verifiedAt 为 3小时前，模拟自然到期；同时 KV 中的 lock 键在 3 小时后自动过期删除
+  await env.nfd.put(`verify:${guestChatId}`, JSON.stringify({ verified: true, verifiedAt: expiredTime }));
+  await env.nfd.delete(`cmd-lock:about:${guestChatId}`);
+  await env.nfd.delete(`cmd-lock:start:${guestChatId}`);
+  await env.nfd.delete(`notify-cd:${guestChatId}`);
+
+  // 3. 访客在 3 小时到期后再次发送对话消息：必须强行拦截，绝对要求二次验证，消息绝不转发！
+  sentMessages.length = 0;
+  const fwdCountBefore = forwardedMessages.length;
+  await bot.handleGuestMessage({
+    chat: { id: guestChatId },
+    from: { id: guestChatId, language_code: 'zh' },
+    message_id: 2,
+    text: '3 小时后我回来了，再次对话'
+  }, 'zh');
+
+  assert.strictEqual(forwardedMessages.length, fwdCountBefore, '3 小时到期后，访客发出的消息绝不能转发给管理员！');
+  const questionMsg = sentMessages.find(m => m.chat_id === guestChatId && m.reply_markup?.inline_keyboard);
+  assert(questionMsg, '3 小时到期后再次对话，必须强行弹出 Emoji 动态视觉算术验证题！');
+
+  // 4. 访客在 3 小时到期后若点击 /start：同样要求验证
+  sentMessages.length = 0;
+  await env.nfd.put(`verify:${guestChatId}`, JSON.stringify({ verified: true, verifiedAt: expiredTime }));
+  await bot.onMessage({ chat: { id: guestChatId }, from: { id: guestChatId, language_code: 'zh' }, text: '/start' });
+  const startQuestionMsg = sentMessages.find(m => m.chat_id === guestChatId && m.reply_markup?.inline_keyboard);
+  assert(startQuestionMsg, '3 小时到期后点击 /start，同样必须弹出 Emoji 验证出题！');
+
+  // 5. 访客答对题目完成二次验证，开启第 2 个 3 小时会话期
+  const vstate = await env.nfd.get(`verify:${guestChatId}`, { type: 'json' });
+  const correctChoice = vstate.correctIndex;
+  await bot.onCallbackQuery({
+    id: 'cb_reverify',
+    from: { id: guestChatId, language_code: 'zh' },
+    message: { message_id: 9999 },
+    data: `v:${vstate.questionId}:${correctChoice}`
+  });
+
+  // 6. 二次验证通过后：/start 和 /about 重新获得 1 次响应配额
+  sentMessages.length = 0;
+  await bot.onMessage({ chat: { id: guestChatId }, from: { id: guestChatId, language_code: 'zh' }, text: '/about' });
+  assert(sentMessages[sentMessages.length - 1].text.includes('关于此机器人'), '新 3 小时周期内，/about 重新响应第 1 次');
+  const countNewAbout = sentMessages.length;
+  await bot.onMessage({ chat: { id: guestChatId }, from: { id: guestChatId, language_code: 'zh' }, text: '/about' });
+  assert.strictEqual(sentMessages.length, countNewAbout, '新周期内重复点击 /about 再次熔断静默');
+
+  // 7. 发送消息再次正常放行转达
+  await bot.handleGuestMessage({
+    chat: { id: guestChatId },
+    from: { id: guestChatId, language_code: 'zh' },
+    message_id: 3,
+    text: '通过二次验证后的新消息'
+  }, 'zh');
+  assert.strictEqual(forwardedMessages.length, fwdCountBefore + 1, '二次验证通过后，新消息立即正常放行转达！');
+
+  console.log('✓ Passed: 3 小时超时再次对话必须二次验证，/about 与 /start 严格跟随 3 小时生命周期。');
+}
+
 async function main() {
   await testQuoteReplyContext();
   await testEmojiDynamicQuestion();
@@ -472,7 +566,8 @@ async function main() {
   await testKeywordFiltering();
   await testMenuSimplification();
   await testRateLimitingAndQuotaProtection();
-  console.log('\n🌟 ALL 11 PRODUCTION TEST SUITES PASSED PERFECTLY (v3.4.0-Shield)!');
+  await testThreeHourSessionExpirationAndReverify();
+  console.log('\n🌟 ALL 12 PRODUCTION TEST SUITES PASSED PERFECTLY (v3.4.0-Shield)!');
 }
 
 main().catch(err => {
