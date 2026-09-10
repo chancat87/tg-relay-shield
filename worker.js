@@ -1175,8 +1175,93 @@ async function handleHttp(request, env, ctx) {
     });
   }
 
-  return new Response(`Telegram Relay Bot is Running! (${BOT_VERSION})`, {
-    headers: { 'Content-Type': 'text/plain; charset=utf-8' }
+  // 根路径：动态状态面板（带强缓存穿透 headers，杜绝浏览器旧版本缓存）
+  const acceptsHtml = (request.headers.get('Accept') || '').includes('text/html');
+  const shieldLevel = await bot.getShieldLevel();
+  const currentModeName = shieldLevel === 2 ? '2. 终极模式 (网页盾牌)' : '1. 标准模式 (Emoji 计数)';
+
+  const noCacheHeaders = {
+    'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0',
+    'Pragma': 'no-cache',
+    'Expires': '0',
+    'Surrogate-Control': 'no-store'
+  };
+
+  if (acceptsHtml) {
+    const html = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TG-Relay-Shield 运行状态</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: #f8fafc; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
+    .card { background: #1e293b; border: 1px solid #334155; border-radius: 16px; padding: 36px 28px; max-width: 480px; width: 100%; box-shadow: 0 20px 40px rgba(0,0,0,0.4); }
+    .header { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
+    .shield-icon { font-size: 32px; }
+    h1 { font-size: 20px; font-weight: 700; color: #f1f5f9; }
+    .status-badge { display: inline-flex; align-items: center; gap: 6px; background: rgba(34, 197, 94, 0.15); color: #4ade80; padding: 4px 10px; border-radius: 9999px; font-size: 13px; font-weight: 600; margin-bottom: 24px; }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #22c55e; box-shadow: 0 0 10px #22c55e; }
+    .meta-list { display: flex; flex-direction: column; gap: 12px; margin-bottom: 28px; }
+    .meta-item { display: flex; justify-content: space-between; font-size: 14px; padding: 10px 14px; background: #0f172a; border-radius: 8px; }
+    .meta-label { color: #94a3b8; }
+    .meta-value { font-family: monospace; font-weight: 600; color: #38bdf8; }
+    .footer { font-size: 13px; color: #64748b; text-align: center; border-top: 1px solid #334155; padding-top: 18px; }
+    .footer a { color: #38bdf8; text-decoration: none; font-weight: 500; }
+    .footer a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="header">
+      <div class="shield-icon">🛡️</div>
+      <div>
+        <h1>TG-Relay-Shield</h1>
+        <div style="font-size: 13px; color: #94a3b8;">Telegram 防骚扰双向中继机器人</div>
+      </div>
+    </div>
+    <div class="status-badge">
+      <div class="status-dot"></div>
+      服务正常运转中 (Operational)
+    </div>
+    <div class="meta-list">
+      <div class="meta-item">
+        <span class="meta-label">系统核心版本</span>
+        <span class="meta-value">${BOT_VERSION}</span>
+      </div>
+      <div class="meta-item">
+        <span class="meta-label">当前防御等级</span>
+        <span class="meta-value">${currentModeName}</span>
+      </div>
+      <div class="meta-item">
+        <span class="meta-label">运行架构</span>
+        <span class="meta-value">Cloudflare Workers</span>
+      </div>
+      <div class="meta-item">
+        <span class="meta-label">查询时间</span>
+        <span class="meta-value">${new Date().toISOString().replace('T', ' ').slice(0, 19)} UTC</span>
+      </div>
+    </div>
+    <div class="footer">
+      开源仓库: <a href="https://github.com/chancat87/tg-relay-shield" target="_blank">chancat87/tg-relay-shield</a>
+    </div>
+  </div>
+</body>
+</html>`;
+    return new Response(html, {
+      headers: {
+        'Content-Type': 'text/html; charset=utf-8',
+        ...noCacheHeaders
+      }
+    });
+  }
+
+  return new Response(`Telegram Relay Bot is Running! (${BOT_VERSION})\nDefense Level: ${currentModeName}\n`, {
+    headers: {
+      'Content-Type': 'text/plain; charset=utf-8',
+      ...noCacheHeaders
+    }
   });
 }
 
