@@ -3,7 +3,7 @@
  * 
  * GitHub: https://github.com/chancat87/tg-relay-shield
  * License: MIT
- * Version: 3.5.0-Shield (Pure & Robust)
+ * Version: 3.6.0-Shield (Pure & Robust)
  * 
  * 核心架构特性：
  * 1. 趣味 Emoji 动态视觉算术 (Native Telegram Shield)：
@@ -41,7 +41,7 @@ function getIntEnv(env, name, def, fallbackName = null) {
   return Number.isFinite(v) && v > 0 ? v : def;
 }
 
-const BOT_VERSION = '3.5.0-Shield';
+const BOT_VERSION = '3.6.0-Shield';
 
 function getBeijingTimeStr() {
   const d = new Date(Date.now() + 8 * 3600 * 1000);
