@@ -3,7 +3,7 @@
  * 
  * GitHub: https://github.com/chancat87/tg-relay-shield
  * License: MIT
- * Version: 3.0.0-Shield (Pure & Robust)
+ * Version: 3.5.0-Shield (Pure & Robust)
  * 
  * 核心架构特性：
  * 1. 趣味 Emoji 动态视觉算术 (Native Telegram Shield)：
@@ -12,16 +12,16 @@
  *    - 题目文本完全不含阿拉伯数字，彻底粉碎通用爬虫正则表达式
  *    - 答案按键 100% 采用标准阿拉伯数字，极佳人类心算体验，手机端零排版挤压
  * 2. 访客“引用回复 (Quote)”上下文还原：
- *    - 解决 Telegram 转发丢失引用气泡痛点。当访客引用历史图片或文字提问时，自动置顶推送上下文摘要
+ *    - 解决 Telegram 转发丢失引用气泡痛点。双向精准还原原生引用回复气泡
  * 3. 100% 纯正中英双语隔离与自适应一键切换：
  *    - 纯中文环境与纯英文环境彻底物理隔离，杜绝混杂
  *    - 答题键盘底部内嵌专属切换按钮，就地即刻无感重绘
- * 4. 3 次答错熔断锁死 (Anti-DDoS)：
- *    - 连错 3 次锁定 30 分钟，锁定期间对恶意连点实施零写 KV 静默拦截，保卫免费额度
+ * 4. 3 次答错熔断锁死与未验证静默保护 (Anti-DDoS)：
+ *    - 连错 3 次锁定 30 分钟，未完成验证前发信 100% 严格静默，切断 API 刷屏攻击面
  * 5. 静默影子拉黑 (Shadowban)：
- *    - 管理员 /block 静默丢弃，绝不发通知刺激对方换小号
+ *    - 管理员 /block 静默丢弃，绝不发通知刺激对方换小号；长按回复已拉黑用户智能拦截告警
  * 6. 身份隔离菜单体系 (Scope-based)：
- *    - 访客端极简（/start, /reset, /about），管理员端专属全功能指令（/help, /block, /unblock, /addkw, /delkw, /listkw, /about）
+ *    - 访客端极简（/start, /about，单周期仅响应一次并熔断），管理员端专属指令（/help, /block, /unblock, /addkw, /delkw, /listkw, /about）
  */
 
 // ========================= 基础辅助与环境兼容 =========================
@@ -41,7 +41,7 @@ function getIntEnv(env, name, def, fallbackName = null) {
   return Number.isFinite(v) && v > 0 ? v : def;
 }
 
-const BOT_VERSION = '3.4.0-Shield';
+const BOT_VERSION = '3.5.0-Shield';
 
 function getBeijingTimeStr() {
   const d = new Date(Date.now() + 8 * 3600 * 1000);
@@ -152,10 +152,6 @@ const I18N = {
     keywordBlocked: '⚠️ 您的消息包含被拦截的敏感内容，未予转交。',
     rateLimited: '⏳ 您发送消息过于频繁，请稍后再试。',
     guestVerifiedStart: '👋 您好！我是私聊中转助手。\n\n您处于安全验证有效期内，可以直接在此发送文字、图片、语音或文件留言，我会帮您转达给主人，请耐心等待回复。',
-    reverifyBtn: '🔄 重新验证 / 重新出题',
-    reverifyNotice: '正在为您生成新验证...',
-    reverifyPrompt: '🔄 会话与验证状态已重置，请完成以下验证：',
-    resetCooldown: '⏳ 操作过于频繁，请在 {sec} 秒后再试。',
     langSwitched: '✅ 语言已切换为简体中文',
     switchLangBtn: '🌐 Switch to English'
   },
@@ -180,10 +176,6 @@ const I18N = {
     keywordBlocked: '⚠️ Your message contained blocked keywords and was dropped.',
     rateLimited: '⏳ You are sending messages too fast. Please slow down.',
     guestVerifiedStart: "👋 Hello! I am the contact relay assistant.\n\nYou are verified! Feel free to send text, photos, files, or voice messages here and I will relay them to the owner, please wait for a reply.",
-    reverifyBtn: '🔄 Re-verify / New Challenge',
-    reverifyNotice: 'Generating new challenge...',
-    reverifyPrompt: '🔄 Session and verification reset. Please complete verification:',
-    resetCooldown: '⏳ Too many requests. Please wait {sec} second(s).',
     langSwitched: '✅ Language switched to English',
     switchLangBtn: '🌐 切换为简体中文'
   }
@@ -329,6 +321,18 @@ class BotCore {
     return await this.kv.get(`verify:${chatId}`, { type: 'json' }).catch(() => null);
   }
 
+  // --- 从消息映射中解析访客真实 UID ---
+  async getUidFromMsgMap(msgId) {
+    if (!msgId) return null;
+    const raw = await this.kv.get(`msg-map-${msgId}`);
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object' && parsed.uid) return String(parsed.uid);
+    } catch (_) {}
+    return String(raw);
+  }
+
   // --- 发送 Emoji 动态视觉算术题目 ---
   async issueQuestion(chatId, lang, sessionId, failCount = 0) {
     const q = generateDynamicQuestion(lang);
@@ -444,7 +448,7 @@ class BotCore {
         // 未验证：初始化会话并立即出题（若已有活跃题目，防止重复出题）
         const hasActiveQuestion = vstate && !vstate.verified && vstate.exp && Date.now() < vstate.exp;
         if (hasActiveQuestion) {
-          await this.api('sendMessage', { chat_id: chatId, text: t(lang, 'verifyWaitingHint') });
+          // 活跃题目未完成期间，严格静默，零回复零写 KV
           return;
         }
 
@@ -476,7 +480,7 @@ class BotCore {
       const match = text.match(/^\/block(?:\s+(\d+))?$/i);
       let targetUid = match && match[1];
       if (!targetUid && msg.reply_to_message) {
-        targetUid = await this.kv.get(`msg-map-${msg.reply_to_message.message_id}`);
+        targetUid = await this.getUidFromMsgMap(msg.reply_to_message.message_id);
       }
       if (!targetUid) {
         await this.api('sendMessage', { chat_id: adminChatId, text: '❌ 无法定位目标用户。请回复转发的消息或输入 `/block 用户ID`', parse_mode: 'Markdown' });
@@ -501,7 +505,7 @@ class BotCore {
       const match = text.match(/^\/unblock(?:\s+(\d+))?$/i);
       let targetUid = match && match[1];
       if (!targetUid && msg.reply_to_message) {
-        targetUid = await this.kv.get(`msg-map-${msg.reply_to_message.message_id}`);
+        targetUid = await this.getUidFromMsgMap(msg.reply_to_message.message_id);
       }
       if (!targetUid) {
         await this.api('sendMessage', { chat_id: adminChatId, text: '❌ 无法定位目标用户。', parse_mode: 'Markdown' });
@@ -579,6 +583,17 @@ class BotCore {
         }
       } catch (_) {}
 
+      // 拦截对已被拉黑访客的回复，保护管理员策略一致性
+      const isBlocked = await this.kv.get(`block:${targetGuestUid}`);
+      if (isBlocked) {
+        await this.api('sendMessage', {
+          chat_id: adminChatId,
+          text: `⚠️ 目标用户 <code>${targetGuestUid}</code> 处于拉黑名单中，消息未发送。\n若要沟通请先对其回复 <code>/unblock</code> 解封。`,
+          parse_mode: 'HTML'
+        });
+        return;
+      }
+
       const copyParams = {
         chat_id: targetGuestUid,
         from_chat_id: adminChatId,
@@ -642,7 +657,8 @@ class BotCore {
     if (!isVerified) {
       const hasActiveQuestion = vstate && !vstate.verified && vstate.exp && Date.now() < vstate.exp;
       if (hasActiveQuestion) {
-        await this.api('sendMessage', { chat_id: chatId, text: t(lang, 'verifyWaitingHint') });
+        // 严格零回复静默：题目未作答期间发送任何文本一律完全静默，绝不发任何文字提示，切断刷屏攻击面
+        return;
       } else {
         await this.issueQuestion(chatId, lang, sess.sid, vstate?.failCount || 0);
       }
@@ -661,13 +677,7 @@ class BotCore {
     const hitWord = await this.checkKeywordHit(searchable);
     if (hitWord) {
       await this.api('sendMessage', { chat_id: chatId, text: t(lang, 'keywordBlocked') });
-      if (this.primaryAdminUid) {
-        await this.api('sendMessage', {
-          chat_id: this.primaryAdminUid,
-          text: `⚠️ 拦截来自 <code>${chatId}</code> 的消息，命中敏感词：<code>${escapeHtml(hitWord)}</code>`,
-          parse_mode: 'HTML'
-        });
-      }
+      // 完全静默丢弃：管理员端零告警通知，保持管理员手机绝对清净
       return;
     }
 

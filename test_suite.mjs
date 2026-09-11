@@ -160,6 +160,16 @@ async function testEmojiVerificationFlow() {
   assert(verifyMsg, '访客初次发信必须收到 Emoji 视觉算术题目');
   assert(verifyMsg.text.includes('防骚扰人机验证'), '必须发送人机验证说明');
 
+  // 1.1 未验证访客在题目未完成期间发送文本：严格零回复静默，切断脚本刷屏攻击面
+  const countBeforeSpam = sentMessages.length;
+  await bot.handleGuestMessage({
+    chat: { id: guestChatId },
+    from: { id: guestChatId, language_code: 'zh' },
+    message_id: 11,
+    text: '我直接在输入框打字发答案'
+  }, 'zh');
+  assert.strictEqual(sentMessages.length, countBeforeSpam, '题目未完成期间发文本必须 100% 严格静默，零发信零写 KV');
+
   // 2. 从 KV 读取当前题目的正确答案索引
   const vstate = await env.nfd.get(`verify:${guestChatId}`, { type: 'json' });
   assert(!vstate.verified, '出题后初始状态为未验证');
@@ -338,11 +348,12 @@ async function testLockoutAfterThreeFails() {
 // --- Test 8: 管理员影子静默拉黑与解封 (/block & /unblock) ---
 async function testAdminShadowban() {
   console.log('--- Test 8: 管理员影子静默拉黑与解封 (/block & /unblock) ---');
-  const { bot, env, sentMessages } = await createTestBot();
+  const { bot, env, sentMessages, copiedMessages } = await createTestBot();
   const adminId = 999999;
   const badGuestId = 33333;
+  const replyGuestId = 44444;
 
-  // 1. 管理员执行 /block
+  // 1. 管理员直接输入 UID 执行 /block
   await bot.handleAdminMessage({ chat: { id: adminId }, from: { id: adminId }, text: `/block ${badGuestId}` }, 'zh');
   const isBlocked = await env.nfd.get(`block:${badGuestId}`);
   assert.strictEqual(isBlocked, '1', 'KV 中必须记录为已拉黑');
@@ -357,11 +368,55 @@ async function testAdminShadowban() {
   }, 'zh');
   assert.strictEqual(sentMessages.length, 0, '被拉黑者发信必须被 100% 静默丢弃');
 
-  // 3. 管理员执行 /unblock
-  await bot.handleAdminMessage({ chat: { id: adminId }, from: { id: adminId }, text: `/unblock ${badGuestId}` }, 'zh');
-  const unblocked = await env.nfd.get(`block:${badGuestId}`);
-  assert.strictEqual(unblocked, null, '解封后 block 记录必须被删除');
-  console.log('✓ Passed: 影子拉黑静默优雅，解封干净利落。');
+  // 3. 管理员长按转发消息回复 /block（验证从 JSON msg-map 中解析 UID）
+  const originMsgId = 555;
+  await env.nfd.put(`msg-map-${originMsgId}`, JSON.stringify({ uid: String(replyGuestId), guestMsgId: 101 }));
+  await bot.handleAdminMessage({
+    chat: { id: adminId },
+    from: { id: adminId },
+    message_id: 601,
+    text: '/block',
+    reply_to_message: { message_id: originMsgId }
+  }, 'zh');
+  const isReplyGuestBlocked = await env.nfd.get(`block:${replyGuestId}`);
+  assert.strictEqual(isReplyGuestBlocked, '1', '长按回复 /block 必须精准解析 JSON 中的 uid 并成功拉黑');
+
+  // 4. 管理员尝试长按回复已被拉黑的访客：必须主动拦截并弹出警告提示
+  sentMessages.length = 0;
+  const copyCountBefore = copiedMessages.length;
+  await bot.handleAdminMessage({
+    chat: { id: adminId },
+    from: { id: adminId },
+    message_id: 602,
+    text: '我想跟你说一句话',
+    reply_to_message: { message_id: originMsgId }
+  }, 'zh');
+  assert.strictEqual(copiedMessages.length, copyCountBefore, '对被拉黑用户的回复严禁实际发出');
+  const warningMsg = sentMessages.find(m => m.chat_id === adminId && m.text.includes('处于拉黑名单中'));
+  assert(warningMsg, '必须向管理员弹出拦截提示，告知用户已被拉黑需先 /unblock');
+
+  // 5. 管理员长按回复 /unblock 解封
+  await bot.handleAdminMessage({
+    chat: { id: adminId },
+    from: { id: adminId },
+    message_id: 603,
+    text: '/unblock',
+    reply_to_message: { message_id: originMsgId }
+  }, 'zh');
+  const unblockedReplyGuest = await env.nfd.get(`block:${replyGuestId}`);
+  assert.strictEqual(unblockedReplyGuest, null, '长按回复 /unblock 必须成功解封');
+
+  // 6. 解封后管理员即可正常回复该访客
+  await bot.handleAdminMessage({
+    chat: { id: adminId },
+    from: { id: adminId },
+    message_id: 604,
+    text: '解封后的正常回复',
+    reply_to_message: { message_id: originMsgId }
+  }, 'zh');
+  assert.strictEqual(copiedMessages.length, copyCountBefore + 1, '解封后回复消息必须正常放行发出');
+
+  console.log('✓ Passed: 影子拉黑静默优雅，长按回复 /block 与回复拦截守护严密。');
 }
 
 // --- Test 9: 广告黑产关键词添加、拦截与删除 (/addkw & /delkw) ---
@@ -389,8 +444,8 @@ async function testKeywordFiltering() {
 
   const blockedNotice = sentMessages.find(m => m.chat_id === guestChatId && m.text.includes('被拦截的敏感内容'));
   assert(blockedNotice, '访客端必须收到敏感词拦截提示');
-  const adminAlert = sentMessages.find(m => m.chat_id === String(adminId) && m.text.includes('命中敏感词'));
-  assert(adminAlert, '管理员端必须收到精准告警');
+  const adminAlert = sentMessages.find(m => (m.chat_id === String(adminId) || m.chat_id === adminId) && m.text?.includes('命中敏感词'));
+  assert(!adminAlert, '管理员端严禁收到告警推送，完全静默丢弃保持绝对清净');
 
   // 3. 管理员删除敏感词
   await bot.handleAdminMessage({ chat: { id: adminId }, from: { id: adminId }, text: '/delkw 菠菜引流' }, 'zh');
@@ -567,7 +622,7 @@ async function main() {
   await testMenuSimplification();
   await testRateLimitingAndQuotaProtection();
   await testThreeHourSessionExpirationAndReverify();
-  console.log('\n🌟 ALL 12 PRODUCTION TEST SUITES PASSED PERFECTLY (v3.4.0-Shield)!');
+  console.log('\n🌟 ALL 12 PRODUCTION TEST SUITES PASSED PERFECTLY (v3.5.0-Shield)!');
 }
 
 main().catch(err => {
