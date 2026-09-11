@@ -8,7 +8,7 @@
 
 [![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-F38020?logo=cloudflare&logoColor=white)](https://workers.cloudflare.com/)
 [![Telegram Bot API](https://img.shields.io/badge/Telegram-Bot%20API-2CA5E0?logo=telegram&logoColor=white)](https://core.telegram.org/bots/api)
-[![Version](https://img.shields.io/badge/Version-v3.6.1--Shield-blue.svg)](https://github.com/chancat87/tg-relay-shield)
+[![Version](https://img.shields.io/badge/Version-v3.6.2--Shield-blue.svg)](https://github.com/chancat87/tg-relay-shield)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Maintenance](https://img.shields.io/badge/Maintained%3F-yes-green.svg)](https://github.com/)
 
