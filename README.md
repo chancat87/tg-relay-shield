@@ -54,8 +54,16 @@
   * 管理员执行 `/block` 后，系统只在管理端确认，**绝不通知被拉黑者**。对方发信看似正常，机器人后台静默忽略，彻底切断换号轰炸动机。
 * 🔒 **隐私保护与匿名回复**：
   * 即使对方开启了 Telegram 的“转发时隐藏账号来源”，底层基于消息映射依然能精准双向回传，你的本体大号对外界 100% 隐身。
+* 🧱 **多访客消息命名空间物理隔离**：
+  * 底层采用 `guest-to-admin:${chatId}:${msgId}` 复合键隔离，即使多位陌生访客产生相同 Telegram 消息 ID，在底层也绝不串线。
+* 🛡️ **安全闭环状态机（防爆破逃逸与防刷）**：
+  * 切换语言或重新执行 `/start` 严格继承已有失败计数，杜绝恶意脚本通过刷新洗白答错记录。
+  * 被锁定用户严禁通过切换语言逃逸 30 分钟惩罚；已验证用户切换母语无损保留通行权，杜绝逆向降级漏洞。
+* 🛑 **频控告警去抖（Debounce）与端点安全鉴权**：
+  * 频控超限警告单窗口期内仅提醒一次，后续刷屏静默丢弃（0 回复、0 写库），切断被恶意利用刷 API 发信配额的攻击面。
+  * 废除弱默认密钥（Fail-Closed 原则），`/quick-setup` 实施基于 `BOT_SECRET` 的严格安全鉴权。
 * 🛠️ **极简身份隔离菜单体系 (Scope-based)**：
-  * 自动为普通访客（极简 `/start` 启动会话、`/about` **关于**）与管理员（专属 `/block`、`/unblock`、`/addkw`、`/delkw`、`/listkw`、`/help` 等）配置物理隔离的操作指令菜单。
+  * 自动为普通访客（极简 `/start` 启动会话、`/about` **关于**）与个人专属管理员（专属 `/block`、`/unblock`、`/addkw`、`/delkw`、`/listkw`、`/help` 等）配置物理隔离的操作指令菜单。
 
 ---
 
@@ -85,8 +93,8 @@
 
 ### 准备工作（1 分钟）
 1. 在 Telegram 找 [@BotFather](https://t.me/BotFather) 发送 `/newbot` 创建机器人，获取 **`BOT_TOKEN`**。
-2. 在 Telegram 找 [@userinfobot](https://t.me/userinfobot) 发送任意消息，获取你的纯数字用户 ID **`ADMIN_UID`**。
-3. 自定义一个随机密钥字符串 **`BOT_SECRET`**（如 `my_secret_key_8899`）。
+2. 在 Telegram 找 [@userinfobot](https://t.me/userinfobot) 发送任意消息，获取你的纯数字用户 ID **`ADMIN_UID`**（个人唯一管理员）。
+3. 自定义一个随机密钥字符串 **`BOT_SECRET`**（如 `my_secret_key_8899`，必填，用于接口防伪鉴权）。
 
 ---
 
@@ -106,7 +114,7 @@
    * **绑定 KV**：在 **绑定 (Bindings)** 中添加 KV 命名空间，**变量名称必须严格填写为 `nfd`**，空间选择刚才创建的 `tg-relay-kv`。
    * **添加环境变量**：在 **变量和机密 (Variables and Secrets)** 中添加以下变量：
      * `BOT_TOKEN`: 你的机器人 Token（必填）
-     * `ADMIN_UID`: 你的 Telegram 纯数字 ID（必填）
+     * `ADMIN_UID`: 你的 Telegram 纯数字 ID（必填，个人管理员账号）
      * `BOT_SECRET`: 你设定的密钥字符串（必填）
    * 点击 **保存并部署**。
 
@@ -143,7 +151,7 @@ npx wrangler secret put ADMIN_UID
 npm run deploy
 ```
 
-发布后，在浏览器访问 `https://<你的 Worker 地址>/quick-setup` 即可完成初始化。
+发布后，在浏览器访问 `https://<你的 Worker 地址>/quick-setup?secret=你的BOT_SECRET` 即可完成初始化。
 
 ---
 
@@ -167,7 +175,7 @@ npm run deploy
 ## ❓ 常见问题 (FAQ)
 
 #### Q1: 为什么点击验证按钮转圈卡住没反应？
-**A**: 这是因为 Telegram Webhook 缺少了 `callback_query` 权限。请直接在浏览器中打开你的 Worker 地址：`https://你的域名/quick-setup`，接口会自动注入完整的 `allowed_updates` 权限并修复。
+**A**: 这是因为 Telegram Webhook 缺少了 `callback_query` 权限。请直接在浏览器中打开：`https://你的域名/quick-setup?secret=你的BOT_SECRET`，接口会自动更新精准的 `allowed_updates` 权限并完成修复。
 
 #### Q2: 我需要自建 VPS 服务器或者搞 Docker 吗？
 **A**: **完全不需要！** 本项目 100% 运行在 Cloudflare Workers 上，Cloudflare 每天提供 10 万次免费请求，对于个人私聊客服用途完全免费且永不断线。

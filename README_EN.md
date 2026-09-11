@@ -53,8 +53,16 @@ Many people use Telegram bots as public contact points (a privacy relay between 
   * Blocking someone via `/block` silences their messages without alerting them, removing the incentive to switch accounts.
 * 🔒 **Complete Admin Anonymity**:
   * Supports replying even if the visitor has enabled "Hide Account on Forwarding". Your real Telegram identity remains 100% private.
+* 🧱 **Visitor Namespace Isolation**:
+  * Employs `guest-to-admin:${chatId}:${msgId}` composite keys, ensuring multi-guest messages with identical Telegram message IDs never collide or cross-thread.
+* 🛡️ **Hardened Verification State Machine**:
+  * Switching languages or triggering `/start` strictly preserves existing failure counts (`failCount`), preventing spammers from evading penalties by reloading.
+  * Locked users cannot bypass the 30-minute cooling window; verified users never get degraded when switching UI languages.
+* 🛑 **Debounced Rate-Limit Alerts & Fail-Closed Secrets**:
+  * Rate-limit flood warnings are issued at most once per window; excessive messages thereafter are dropped completely silently (0 replies, 0 KV writes).
+  * No insecure fallback secrets; `/quick-setup` requires strict authentication via `?secret=YOUR_BOT_SECRET`.
 * 🛠️ **Minimalist Scope-Based Command Menus**:
-  * Configures clean menus for visitors (only `/start` and `/about`) and full management commands for admins.
+  * Configures clean menus for visitors (only `/start` and `/about`) and full management commands for the sole owner admin.
 
 ---
 
@@ -62,8 +70,8 @@ Many people use Telegram bots as public contact points (a privacy relay between 
 
 ### Prerequisites
 1. Create a bot via [@BotFather](https://t.me/BotFather) and obtain your **`BOT_TOKEN`**.
-2. Message [@userinfobot](https://t.me/userinfobot) to get your numeric Telegram user ID **`ADMIN_UID`**.
-3. Create a secret token string for **`BOT_SECRET`** (e.g. `my_secret_token_8899`).
+2. Message [@userinfobot](https://t.me/userinfobot) to get your numeric Telegram user ID **`ADMIN_UID`** (sole owner admin).
+3. Create a secret token string for **`BOT_SECRET`** (e.g. `my_secret_token_8899`, required for setup authentication).
 
 ---
 
