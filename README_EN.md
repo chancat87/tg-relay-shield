@@ -8,7 +8,7 @@ A high-performance, zero-cost, anti-abuse contact relay bot built on Cloudflare 
 
 [![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-F38020?logo=cloudflare&logoColor=white)](https://workers.cloudflare.com/)
 [![Telegram Bot API](https://img.shields.io/badge/Telegram-Bot%20API-2CA5E0?logo=telegram&logoColor=white)](https://core.telegram.org/bots/api)
-[![Version](https://img.shields.io/badge/Version-v3.6.0--Shield-blue.svg)](https://github.com/chancat87/tg-relay-shield)
+[![Version](https://img.shields.io/badge/Version-v3.6.1--Shield-blue.svg)](https://github.com/chancat87/tg-relay-shield)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 [中文文档](./README.md) · [Features](#-key-features) · [Deployment](#-quick-deployment) · [Commands](#-admin-commands) · [FAQ](#-faq)

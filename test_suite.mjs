@@ -622,7 +622,7 @@ async function main() {
   await testMenuSimplification();
   await testRateLimitingAndQuotaProtection();
   await testThreeHourSessionExpirationAndReverify();
-  console.log('\n🌟 ALL 12 PRODUCTION TEST SUITES PASSED PERFECTLY (v3.6.0-Shield)!');
+  console.log('\n🌟 ALL 12 PRODUCTION TEST SUITES PASSED PERFECTLY (v3.6.1-Shield)!');
 }
 
 main().catch(err => {
