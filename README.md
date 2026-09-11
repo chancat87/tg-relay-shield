@@ -8,7 +8,7 @@
 
 [![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-F38020?logo=cloudflare&logoColor=white)](https://workers.cloudflare.com/)
 [![Telegram Bot API](https://img.shields.io/badge/Telegram-Bot%20API-2CA5E0?logo=telegram&logoColor=white)](https://core.telegram.org/bots/api)
-[![Version](https://img.shields.io/badge/Version-v3.6.2--Shield-blue.svg)](https://github.com/chancat87/tg-relay-shield)
+[![Version](https://img.shields.io/badge/Version-v3.7.0--Shield-blue.svg)](https://github.com/chancat87/tg-relay-shield)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Maintenance](https://img.shields.io/badge/Maintained%3F-yes-green.svg)](https://github.com/)
 
@@ -112,9 +112,9 @@
 
 4. **一键激活（自动配置全量权限）**：
    * （推荐绑定自定义域名，例如 `tg.aichi.de5.net`，在 Worker 设置中绑定即可）。
-   * 直接在浏览器访问：
+   * 直接在浏览器访问（带上设定的密钥）：
      ```text
-     https://你的域名/quick-setup
+     https://你的域名/quick-setup?secret=你的BOT_SECRET
      ```
    * 看到返回 `{"ok": true, "result": true, "description": "Webhook was set"}` 即大功告成！
 

@@ -8,7 +8,7 @@ A high-performance, zero-cost, anti-abuse contact relay bot built on Cloudflare 
 
 [![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-F38020?logo=cloudflare&logoColor=white)](https://workers.cloudflare.com/)
 [![Telegram Bot API](https://img.shields.io/badge/Telegram-Bot%20API-2CA5E0?logo=telegram&logoColor=white)](https://core.telegram.org/bots/api)
-[![Version](https://img.shields.io/badge/Version-v3.6.2--Shield-blue.svg)](https://github.com/chancat87/tg-relay-shield)
+[![Version](https://img.shields.io/badge/Version-v3.7.0--Shield-blue.svg)](https://github.com/chancat87/tg-relay-shield)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 [中文文档](./README.md) · [Features](#-key-features) · [Deployment](#-quick-deployment) · [Commands](#-admin-commands) · [FAQ](#-faq)
@@ -88,11 +88,11 @@ Many people use Telegram bots as public contact points (a privacy relay between 
    * Click **Save and Deploy**.
 
 4. **Activate Bot**:
-   * Open in your browser:
+   * Open in your browser (with your secret token):
      ```text
-     https://<your-worker-subdomain>.workers.dev/quick-setup
+     https://<your-worker-subdomain>.workers.dev/quick-setup?secret=YOUR_BOT_SECRET
      ```
-     *(Or use your custom domain: `https://bot.yourdomain.com/quick-setup`)*
+     *(Or use your custom domain: `https://bot.yourdomain.com/quick-setup?secret=YOUR_BOT_SECRET`)*
    * Seeing `{"ok": true, "result": true, "description": "Webhook was set"}` means you are good to go!
 
 ---
@@ -120,7 +120,7 @@ npx wrangler secret put ADMIN_UID
 npm run deploy
 ```
 
-Then visit `https://<your-worker-domain>/quick-setup` in your browser to activate.
+Then visit `https://<your-worker-domain>/quick-setup?secret=YOUR_BOT_SECRET` in your browser to activate.
 
 ---
 

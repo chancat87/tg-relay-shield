@@ -3,7 +3,7 @@
  * 
  * GitHub: https://github.com/chancat87/tg-relay-shield
  * License: MIT
- * Version: 3.6.2-Shield (Pure & Robust)
+ * Version: 3.7.0-Shield (Pure & Robust)
  * 
  * 核心架构特性：
  * 1. 趣味 Emoji 动态视觉算术 (Native Telegram Shield)：
@@ -41,7 +41,7 @@ function getIntEnv(env, name, def, fallbackName = null) {
   return Number.isFinite(v) && v > 0 ? v : def;
 }
 
-const BOT_VERSION = '3.6.2-Shield';
+const BOT_VERSION = '3.7.0-Shield';
 
 function getBeijingTimeStr() {
   const d = new Date(Date.now() + 8 * 3600 * 1000);
@@ -202,12 +202,13 @@ class BotCore {
     }
 
     this.token = getEnv(env, 'BOT_TOKEN', 'ENV_BOT_TOKEN');
-    this.secret = getEnv(env, 'BOT_SECRET', 'ENV_BOT_SECRET') || 'default_secret';
+    this.secret = getEnv(env, 'BOT_SECRET', 'ENV_BOT_SECRET');
+    if (!this.secret) {
+      throw new Error('BOT_SECRET 未配置，请在 Cloudflare 环境变量中设置高强度密钥后重试');
+    }
     this.adminSecret = getEnv(env, 'ADMIN_SECRET') || this.secret;
     
-    const adminUidsStr = String(getEnv(env, 'ADMIN_UID', 'ENV_ADMIN_UID') || '');
-    this.adminUids = adminUidsStr.split(',').map(s => s.trim()).filter(Boolean);
-    this.primaryAdminUid = this.adminUids[0] || '';
+    this.adminUid = String(getEnv(env, 'ADMIN_UID', 'ENV_ADMIN_UID') || '').trim();
 
     this.webhookPath = (getEnv(env, 'WEBHOOK_PATH') || '/endpoint').trim();
     if (!this.webhookPath.startsWith('/')) this.webhookPath = '/' + this.webhookPath;
@@ -223,7 +224,7 @@ class BotCore {
   }
 
   isAdmin(uid) {
-    return this.adminUids.includes(String(uid));
+    return Boolean(this.adminUid && String(uid) === this.adminUid);
   }
 
   async api(method, body = {}) {
@@ -457,7 +458,7 @@ class BotCore {
           await this.kv.put(`session:${chatId}`, JSON.stringify({ sid: newSessionId, at: Date.now() }), { expirationTtl: 30 * 86400 });
         }
         await this.api('sendMessage', { chat_id: chatId, text: t(lang, 'guestStart') });
-        await this.issueQuestion(chatId, lang, newSessionId, 0);
+        await this.issueQuestion(chatId, lang, newSessionId, vstate?.failCount || 0);
       }
       return;
     }
@@ -494,8 +495,8 @@ class BotCore {
       await this.kv.put(`block:${targetUid}`, '1');
       await this.api('sendMessage', {
         chat_id: adminChatId,
-        text: `✅ 用户 \`${targetUid}\` 已被【静默拉黑】。\n对方发信将被机器人静默丢弃，不发通知刺激对方。`,
-        parse_mode: 'Markdown'
+        text: `✅ 用户 <code>${escapeHtml(targetUid)}</code> 已被【静默拉黑】。\n对方发信将被机器人静默丢弃，不发通知刺激对方。`,
+        parse_mode: 'HTML'
       });
       return;
     }
@@ -508,7 +509,7 @@ class BotCore {
         targetUid = await this.getUidFromMsgMap(msg.reply_to_message.message_id);
       }
       if (!targetUid) {
-        await this.api('sendMessage', { chat_id: adminChatId, text: '❌ 无法定位目标用户。', parse_mode: 'Markdown' });
+        await this.api('sendMessage', { chat_id: adminChatId, text: '❌ 无法定位目标用户。', parse_mode: 'HTML' });
         return;
       }
       await this.kv.delete(`block:${targetUid}`);
@@ -516,7 +517,7 @@ class BotCore {
       await this.kv.delete(`notify-cd:${targetUid}`);
       await this.kv.delete(`cmd-lock:about:${targetUid}`);
       await this.kv.delete(`cmd-lock:start:${targetUid}`);
-      await this.api('sendMessage', { chat_id: adminChatId, text: `✅ 用户 \`${targetUid}\` 已解除屏蔽并清空惩罚状态。`, parse_mode: 'Markdown' });
+      await this.api('sendMessage', { chat_id: adminChatId, text: `✅ 用户 <code>${escapeHtml(targetUid)}</code> 已解除屏蔽并清空惩罚状态。`, parse_mode: 'HTML' });
       return;
     }
 
@@ -528,7 +529,7 @@ class BotCore {
         list.push(kw);
         await this.kv.put('kw-list', JSON.stringify(list));
       }
-      await this.api('sendMessage', { chat_id: adminChatId, text: `✅ 已添加拦截词：\`${kw}\``, parse_mode: 'Markdown' });
+      await this.api('sendMessage', { chat_id: adminChatId, text: `✅ 已添加拦截词：<code>${escapeHtml(kw)}</code>`, parse_mode: 'HTML' });
       return;
     }
 
@@ -538,14 +539,14 @@ class BotCore {
       let list = await this.loadLocalKeywords();
       list = list.filter(w => w !== kw);
       await this.kv.put('kw-list', JSON.stringify(list));
-      await this.api('sendMessage', { chat_id: adminChatId, text: `✅ 已删除拦截词：\`${kw}\``, parse_mode: 'Markdown' });
+      await this.api('sendMessage', { chat_id: adminChatId, text: `✅ 已删除拦截词：<code>${escapeHtml(kw)}</code>`, parse_mode: 'HTML' });
       return;
     }
 
     // /listkw
     if (/^\/listkw$/i.test(text)) {
       const list = await this.loadLocalKeywords();
-      const body = list.length ? list.map((w, i) => `${i + 1}. \`${w}\``).join('\n') : '(暂无拦截词)';
+      const body = list.length ? list.map((w, i) => `${i + 1}. <code>${escapeHtml(w)}</code>`).join('\n') : '(暂无拦截词)';
       await this.api('sendMessage', { chat_id: adminChatId, text: `📃 <b>当前本地拦截关键词：</b>\n${body}`, parse_mode: 'HTML' });
       return;
     }
@@ -612,7 +613,7 @@ class BotCore {
       if (copyRes && copyRes.ok && copyRes.result) {
         const deliveredGuestMsgId = copyRes.result.message_id;
         // 记录双向映射，有效期 14 天
-        await this.kv.put(`guest-to-admin:${deliveredGuestMsgId}`, String(msg.message_id), { expirationTtl: 14 * 86400 });
+        await this.kv.put(`guest-to-admin:${targetGuestUid}:${deliveredGuestMsgId}`, String(msg.message_id), { expirationTtl: 14 * 86400 });
         await this.kv.put(`msg-map-${msg.message_id}`, JSON.stringify({ uid: String(targetGuestUid), guestMsgId: deliveredGuestMsgId }), { expirationTtl: 14 * 86400 });
       } else {
         await this.api('sendMessage', { chat_id: adminChatId, text: `❌ 回复发送失败：${copyRes?.error || copyRes?.description || '未知原因'}` });
@@ -665,10 +666,15 @@ class BotCore {
       return;
     }
 
-    // 4. 频控检查
+    // 4. 频控检查 (带首次提示后静默丢弃保护)
     const limited = await this.checkRateLimit(chatId);
     if (limited) {
-      await this.api('sendMessage', { chat_id: chatId, text: t(lang, 'rateLimited') });
+      const rlNotifyKey = `rl-notified:${chatId}`;
+      const hasNotified = await this.kv.get(rlNotifyKey);
+      if (!hasNotified) {
+        await this.kv.put(rlNotifyKey, '1', { expirationTtl: this.rateLimitWindow });
+        await this.api('sendMessage', { chat_id: chatId, text: t(lang, 'rateLimited') });
+      }
       return;
     }
 
@@ -682,21 +688,21 @@ class BotCore {
     }
 
     // 6. 核心转发至管理员（支持原生引用回复双向映射）
-    if (!this.primaryAdminUid) {
+    if (!this.adminUid) {
       await this.api('sendMessage', { chat_id: chatId, text: t(lang, 'forwardFail') });
       return;
     }
 
     let targetAdminMsgId = null;
     if (msg.reply_to_message) {
-      targetAdminMsgId = await this.kv.get(`guest-to-admin:${msg.reply_to_message.message_id}`);
+      targetAdminMsgId = await this.kv.get(`guest-to-admin:${chatId}:${msg.reply_to_message.message_id}`);
     }
 
     let fwdRes;
     if (targetAdminMsgId) {
       // 访客回复了某条消息：通过 copyMessage 附带原生 reply_parameters 呈现 Telegram 原生引用回复气泡
       fwdRes = await this.api('copyMessage', {
-        chat_id: this.primaryAdminUid,
+        chat_id: this.adminUid,
         from_chat_id: chatId,
         message_id: msg.message_id,
         reply_parameters: {
@@ -707,7 +713,7 @@ class BotCore {
     } else {
       // 访客普通发信：通过 forwardMessage 完整保留来源信息
       fwdRes = await this.api('forwardMessage', {
-        chat_id: this.primaryAdminUid,
+        chat_id: this.adminUid,
         from_chat_id: chatId,
         message_id: msg.message_id
       });
@@ -717,9 +723,9 @@ class BotCore {
       const adminFwdMsgId = fwdRes.result.message_id;
       // 记录双向映射（保留 14 天）
       await this.kv.put(`msg-map-${adminFwdMsgId}`, JSON.stringify({ uid: String(chatId), guestMsgId: msg.message_id }), { expirationTtl: 14 * 86400 });
-      await this.kv.put(`guest-to-admin:${msg.message_id}`, String(adminFwdMsgId), { expirationTtl: 14 * 86400 });
+      await this.kv.put(`guest-to-admin:${chatId}:${msg.message_id}`, String(adminFwdMsgId), { expirationTtl: 14 * 86400 });
       
-      // 消息送达提示：实施 10 分钟静默冷却窗口，单窗口期内仅首条发送提示，杜绝连续发信重复刷屏
+      // 消息送达提示：生命周期与验证有效期（3 小时）对齐，窗口期内首条提示，后续完全静默转达
       const notifyKey = `notify-cd:${chatId}`;
       const hasNotified = await this.kv.get(notifyKey);
       if (!hasNotified) {
@@ -747,29 +753,50 @@ class BotCore {
         text: t(lang, 'langSwitched')
       });
 
+      const vstate = await this.getVerificationState(userId);
+
+      // 1.1 已验证用户：仅切换偏好语言，严禁篡改验证状态，绝不重新出题
+      if (vstate && vstate.verified) {
+        return;
+      }
+
+      // 1.2 处于 30 分钟锁定状态：严禁出新题，严禁清零锁定时间与失败计数
+      if (vstate && vstate.lockedUntil && Date.now() < vstate.lockedUntil) {
+        const waitMin = Math.ceil((vstate.lockedUntil - Date.now()) / 60000);
+        await this.api('answerCallbackQuery', {
+          callback_query_id: cbq.id,
+          text: t(lang, 'lockoutActive', { min: waitMin }),
+          show_alert: true
+        });
+        return;
+      }
+
+      // 1.3 正常未验证用户：切语言并重绘题目，但必须继承历史 failCount 与到期时间
       const newQ = generateDynamicQuestion(lang);
       const sess = await this.kv.get(`session:${userId}`, { type: 'json' }).catch(() => null);
       const activeSess = sess || { sid: Math.random().toString(36).slice(2, 10), at: Date.now() };
-      
-      const vstate = {
+
+      const updatedState = {
         sessionId: activeSess.sid,
         questionId: newQ.id,
         correctIndex: newQ.correctIndex,
-        exp: Date.now() + 10 * 60 * 1000,
+        exp: vstate?.exp || (Date.now() + 10 * 60 * 1000),
         verified: false,
-        failCount: 0,
+        failCount: vstate?.failCount || 0,
         lockedUntil: 0
       };
-      await this.kv.put(`verify:${userId}`, JSON.stringify(vstate), { expirationTtl: this.verifiedTtlSeconds });
+      await this.kv.put(`verify:${userId}`, JSON.stringify(updatedState), { expirationTtl: this.verifiedTtlSeconds });
 
       const keyboard = this.buildQuestionKeyboard(newQ, lang);
-      await this.api('editMessageText', {
-        chat_id: userId,
-        message_id: messageId,
-        text: `${t(lang, 'verifyPrompt')}${newQ.question}${t(lang, 'verifyPick')}`,
-        parse_mode: 'HTML',
-        reply_markup: keyboard
-      });
+      if (messageId) {
+        await this.api('editMessageText', {
+          chat_id: userId,
+          message_id: messageId,
+          text: `${t(lang, 'verifyPrompt')}${newQ.question}${t(lang, 'verifyPick')}`,
+          parse_mode: 'HTML',
+          reply_markup: keyboard
+        });
+      }
       return;
     }
 
@@ -931,11 +958,10 @@ class BotCore {
       { command: 'listkw', description: '📋 查看所有敏感拦截词' }
     ];
 
-    for (const uid of this.adminUids) {
-      if (!uid) continue;
+    if (this.adminUid) {
       await this.api('setMyCommands', {
         commands: adminCommands,
-        scope: { type: 'chat', chat_id: parseInt(uid, 10) }
+        scope: { type: 'chat', chat_id: parseInt(this.adminUid, 10) }
       });
     }
   }
@@ -945,7 +971,7 @@ class BotCore {
     const res = await this.api('setWebhook', {
       url: webhookUrl,
       secret_token: this.secret,
-      allowed_updates: ['message', 'edited_message', 'callback_query', 'chat_member'],
+      allowed_updates: ['message', 'callback_query'],
       drop_pending_updates: false
     });
     await this.setupCommands();
@@ -969,19 +995,31 @@ async function handleHttp(request, env, ctx) {
     }
     try {
       const update = await request.json();
+      const task = async () => {
+        try {
+          await bot.handleUpdate(update, url.hostname);
+        } catch (err) {
+          console.error('[TG-Relay-Shield] Webhook Update Error:', err);
+        }
+      };
       if (ctx && ctx.waitUntil) {
-        ctx.waitUntil(bot.handleUpdate(update, url.hostname));
+        ctx.waitUntil(task());
       } else {
-        await bot.handleUpdate(update, url.hostname);
+        await task();
       }
       return new Response('OK');
     } catch (err) {
+      console.error('[TG-Relay-Shield] Request Parse Error:', err);
       return new Response(err.message, { status: 500 });
     }
   }
 
-  // 一键注册端点
+  // 一键注册端点（必须携带 ?secret= 参数鉴权）
   if (path === '/quick-setup') {
+    const secretParam = url.searchParams.get('secret');
+    if (!timingSafeEqual(secretParam, bot.secret)) {
+      return new Response('Unauthorized: Invalid secret query parameter', { status: 403 });
+    }
     const res = await bot.registerWebhook(url.hostname);
     return new Response(JSON.stringify(res, null, 2), {
       headers: { 'Content-Type': 'application/json; charset=utf-8' }
@@ -1082,9 +1120,3 @@ export default {
 };
 
 export { BotCore, generateDynamicQuestion, getBeijingTimeStr };
-
-if (typeof addEventListener === 'function') {
-  addEventListener('fetch', event => {
-    event.respondWith(handleHttp(event.request, globalThis, event));
-  });
-}

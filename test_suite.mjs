@@ -609,6 +609,209 @@ async function testThreeHourSessionExpirationAndReverify() {
   console.log('✓ Passed: 3 小时超时再次对话必须二次验证，/about 与 /start 严格跟随 3 小时生命周期。');
 }
 
+// --- Test 13: 对抗性防御测试 - 答错后点击 set_lang 严禁重置 failCount (BUG-1) ---
+async function testSetLangPreservesFailCount() {
+  console.log('--- Test 13: 答错后点击 set_lang 必须保留失败计数 (BUG-1 防爆破绕过) ---');
+  const { bot, env } = await createTestBot();
+  const guestChatId = 88001;
+
+  // 1. 出题并模拟连续答错 2 次
+  await bot.handleGuestMessage({ chat: { id: guestChatId }, from: { id: guestChatId }, message_id: 1, text: 'hi' }, 'zh');
+  let vstate = await env.nfd.get(`verify:${guestChatId}`, { type: 'json' });
+  const wrongIdx1 = (vstate.correctIndex + 1) % 4;
+  await bot.onCallbackQuery({
+    id: 'cb_fail1',
+    data: `v:${vstate.questionId}:${wrongIdx1}`,
+    from: { id: guestChatId },
+    message: { chat: { id: guestChatId }, message_id: 1001 }
+  });
+  vstate = await env.nfd.get(`verify:${guestChatId}`, { type: 'json' });
+  const wrongIdx2 = (vstate.correctIndex + 1) % 4;
+  await bot.onCallbackQuery({
+    id: 'cb_fail2',
+    data: `v:${vstate.questionId}:${wrongIdx2}`,
+    from: { id: guestChatId },
+    message: { chat: { id: guestChatId }, message_id: 1001 }
+  });
+  vstate = await env.nfd.get(`verify:${guestChatId}`, { type: 'json' });
+  assert.strictEqual(vstate.failCount, 2, '前置条件：答错 2 次 failCount 应为 2');
+
+  // 2. 攻击者企图点击 set_lang:en 尝试清零 failCount
+  await bot.onCallbackQuery({
+    id: 'cb_lang_attack',
+    data: 'set_lang:en',
+    from: { id: guestChatId },
+    message: { chat: { id: guestChatId }, message_id: 1001 }
+  });
+
+  const stateAfterSwitch = await env.nfd.get(`verify:${guestChatId}`, { type: 'json' });
+  assert.strictEqual(stateAfterSwitch.failCount, 2, '防御确认：切换语言后 failCount 必须严格保持为 2，严禁被清零！');
+  console.log('✓ Passed: 切换语言严禁重置失败计数，对抗防爆破防线坚固。');
+}
+
+// --- Test 14: 对抗性防御测试 - 处于 30 分钟锁定状态下点击 set_lang 严禁解锁 (BUG-1) ---
+async function testSetLangCannotBypassLockout() {
+  console.log('--- Test 14: 锁定状态下点击 set_lang 严禁自解锁定 (BUG-1 锁定期防御) ---');
+  const { bot, env, callbacksAnswered } = await createTestBot();
+  const guestChatId = 88002;
+  const lockedTime = Date.now() + 25 * 60 * 1000;
+
+  // 模拟用户处于锁定状态
+  await env.nfd.put(`verify:${guestChatId}`, JSON.stringify({
+    verified: false,
+    failCount: 3,
+    lockedUntil: lockedTime
+  }));
+
+  // 点击 set_lang:en 试图自解
+  await bot.onCallbackQuery({
+    id: 'cb_unlock_hack',
+    data: 'set_lang:en',
+    from: { id: guestChatId },
+    message: { chat: { id: guestChatId }, message_id: 1001 }
+  });
+
+  const state = await env.nfd.get(`verify:${guestChatId}`, { type: 'json' });
+  assert.strictEqual(state.lockedUntil, lockedTime, '锁定时间必须完好保留，严禁归零！');
+  assert.strictEqual(state.failCount, 3, '失败计数必须完好保留！');
+  const alertToast = callbacksAnswered.find(c => c.callback_query_id === 'cb_unlock_hack' && c.show_alert);
+  assert(alertToast, '必须向攻击者弹出锁定警告');
+  console.log('✓ Passed: 锁定状态下点击语言切换无法逃逸锁定。');
+}
+
+// --- Test 15: 对抗性防御测试 - 已验证用户点击 set_lang 严禁降级重置 (BUG-1) ---
+async function testSetLangDoesNotDowngradeVerifiedUser() {
+  console.log('--- Test 15: 已验证用户点击 set_lang 严禁被降级为未验证 (BUG-1 状态保护) ---');
+  const { bot, env } = await createTestBot();
+  const guestChatId = 88003;
+  const now = Date.now();
+
+  await env.nfd.put(`verify:${guestChatId}`, JSON.stringify({
+    verified: true,
+    verifiedAt: now,
+    failCount: 0,
+    lockedUntil: 0
+  }));
+
+  // 已验证用户点击旧气泡上的 set_lang:en
+  await bot.onCallbackQuery({
+    id: 'cb_verified_lang',
+    data: 'set_lang:en',
+    from: { id: guestChatId },
+    message: { chat: { id: guestChatId }, message_id: 1001 }
+  });
+
+  const state = await env.nfd.get(`verify:${guestChatId}`, { type: 'json' });
+  assert.strictEqual(state.verified, true, '已验证用户点击语言切换后，必须依然保持 verified: true！');
+  assert.strictEqual(state.verifiedAt, now, '验证时间戳严禁被篡改！');
+  console.log('✓ Passed: 已验证用户语言切换安全无损，严禁反向降级。');
+}
+
+// --- Test 16: 对抗性防御测试 - 答错后发送 /start 必须继承失败计数 (BUG-2) ---
+async function testStartPreservesFailCount() {
+  console.log('--- Test 16: /start 重出题必须继承失败计数 (BUG-2 熔断计数继承) ---');
+  const { bot, env } = await createTestBot();
+  const guestChatId = 88004;
+
+  // 模拟答错 2 次，题目过期
+  await env.nfd.put(`verify:${guestChatId}`, JSON.stringify({
+    verified: false,
+    failCount: 2,
+    lockedUntil: 0,
+    exp: Date.now() - 1000 // 已过期
+  }));
+
+  // 发送 /start 出新题
+  await bot.onMessage({
+    chat: { id: guestChatId },
+    from: { id: guestChatId, language_code: 'zh' },
+    text: '/start'
+  });
+
+  const state = await env.nfd.get(`verify:${guestChatId}`, { type: 'json' });
+  assert.strictEqual(state.failCount, 2, '通过 /start 出新题必须继承此前的 failCount: 2！');
+  console.log('✓ Passed: /start 出新题继承失败计数，严禁归零洗白。');
+}
+
+// --- Test 17: 对抗性防御测试 - 多访客相同 message_id 命名空间隔离 (BUG-3) ---
+async function testGuestToAdminMultiUserIsolation() {
+  console.log('--- Test 17: 多访客相同 message_id 命名空间隔离 (BUG-3 引用防串线) ---');
+  const { bot, env } = await createTestBot();
+  const guestA = 11111;
+  const guestB = 22222;
+  const now = Date.now();
+
+  // 双方均已验证
+  await env.nfd.put(`verify:${guestA}`, JSON.stringify({ verified: true, verifiedAt: now }));
+  await env.nfd.put(`verify:${guestB}`, JSON.stringify({ verified: true, verifiedAt: now }));
+
+  // 访客 A 发送一条消息 (ID: 50)
+  await bot.handleGuestMessage({
+    chat: { id: guestA },
+    from: { id: guestA },
+    message_id: 50,
+    text: 'A 的消息 50'
+  }, 'zh');
+  const mapA = await env.nfd.get(`guest-to-admin:${guestA}:50`);
+  assert(mapA, 'A 的映射必须存在并带有 guestA 的 chatId 命名空间');
+
+  // 访客 B 也发送一条独立消息 (恰好 ID 也是 50)
+  await bot.handleGuestMessage({
+    chat: { id: guestB },
+    from: { id: guestB },
+    message_id: 50,
+    text: 'B 的消息 50'
+  }, 'zh');
+  const mapB = await env.nfd.get(`guest-to-admin:${guestB}:50`);
+  assert(mapB, 'B 的映射必须存在并带有 guestB 的 chatId 命名空间');
+
+  // 关键断言：B 的消息 50 绝不能覆盖 A 的映射！
+  const mapACheck = await env.nfd.get(`guest-to-admin:${guestA}:50`);
+  assert.strictEqual(mapACheck, mapA, 'A 的消息映射绝不能被 B 覆盖！');
+  assert.notStrictEqual(mapA, mapB, '双方各自转发的消息 ID 互不干扰');
+  console.log('✓ Passed: 多访客相同消息ID完全基于 chatId 物理隔离，引用永不串线。');
+}
+
+// --- Test 18: 安全闭环测试 - 特殊字符关键词转义与 BOT_SECRET 安全阻断 (BUG-4 & BUG-5) ---
+async function testSecurityHardeningAndHtmlEscape() {
+  console.log('--- Test 18: 敏感词 HTML 转义与 BOT_SECRET 安全闭环 (BUG-4 & BUG-5) ---');
+  
+  // 1. 测试 BOT_SECRET 缺省时必须直接抛异常 (Fail Closed)
+  assert.throws(() => {
+    new BotCore({
+      nfd: {},
+      BOT_TOKEN: 'token'
+      // 故意不传 BOT_SECRET
+    });
+  }, /BOT_SECRET 未配置/, '未配置 BOT_SECRET 必须安全拒绝启动！');
+
+  // 2. 测试特殊字符关键词 HTML 转义回显
+  const { bot, sentMessages } = await createTestBot();
+  const adminId = 999999;
+  
+  // 添加带 <script>、<b>、& 的恶意字符关键词
+  await bot.handleAdminMessage({
+    chat: { id: adminId },
+    from: { id: adminId },
+    text: '/addkw <b>广告</b> & <script>'
+  }, 'zh');
+
+  // 查看列表
+  sentMessages.length = 0;
+  await bot.handleAdminMessage({
+    chat: { id: adminId },
+    from: { id: adminId },
+    text: '/listkw'
+  }, 'zh');
+
+  const listMsg = sentMessages.find(m => m.chat_id === adminId && m.parse_mode === 'HTML');
+  assert(listMsg, '/listkw 必须使用 HTML 模式');
+  assert(listMsg.text.includes('&lt;b&gt;广告&lt;/b&gt; &amp; &lt;script&gt;'), '特殊 HTML 字符必须被 100% 安全转义！');
+  assert(!listMsg.text.includes('<script>'), '严禁输出裸脚本标签');
+
+  console.log('✓ Passed: 敏感词回显 HTML 实体转义严密，BOT_SECRET 缺失时安全阻断。');
+}
+
 async function main() {
   await testQuoteReplyContext();
   await testEmojiDynamicQuestion();
@@ -622,7 +825,13 @@ async function main() {
   await testMenuSimplification();
   await testRateLimitingAndQuotaProtection();
   await testThreeHourSessionExpirationAndReverify();
-  console.log('\n🌟 ALL 12 PRODUCTION TEST SUITES PASSED PERFECTLY (v3.6.2-Shield)!');
+  await testSetLangPreservesFailCount();
+  await testSetLangCannotBypassLockout();
+  await testSetLangDoesNotDowngradeVerifiedUser();
+  await testStartPreservesFailCount();
+  await testGuestToAdminMultiUserIsolation();
+  await testSecurityHardeningAndHtmlEscape();
+  console.log('\n🌟 ALL 18 PRODUCTION TEST SUITES PASSED PERFECTLY (v3.7.0-Shield)!');
 }
 
 main().catch(err => {
