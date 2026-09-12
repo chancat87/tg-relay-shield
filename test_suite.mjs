@@ -674,10 +674,12 @@ async function testSetLangCannotBypassLockout() {
   const state = await env.nfd.get(`verify:${guestChatId}`, { type: 'json' });
   assert.strictEqual(state.lockedUntil, lockedTime, '锁定时间必须完好保留，严禁归零！');
   assert.strictEqual(state.failCount, 3, '失败计数必须完好保留！');
+  const langInKv = await env.nfd.get(`lang:${guestChatId}`);
+  assert.strictEqual(langInKv, null, '锁定用户点击切换语言，必须 100% 零写 KV，杜绝恶意刷配额！');
   const answers = callbacksAnswered.filter(c => c.callback_query_id === 'cb_unlock_hack');
   assert.strictEqual(answers.length, 1, '锁定用户切换语言必须仅触发单次强警示弹窗，严禁产生气泡+弹窗重复干扰');
   assert.strictEqual(answers[0].show_alert, true, '必须是强警告弹窗');
-  console.log('✓ Passed: 锁定状态下点击语言切换无法逃逸锁定，且弹窗纯净无重复。');
+  console.log('✓ Passed: 锁定状态下点击语言切换无法逃逸锁定，且弹窗纯净无重复、100% 零写 KV。');
 }
 
 // --- Test 15: 对抗性防御测试 - 已验证用户点击 set_lang 严禁降级重置 (BUG-1) ---
@@ -861,6 +863,21 @@ async function testSetLangOnExpiredQuestionRenewsExpiration() {
   console.log('✓ Passed: 过期题目切语言时到期时间自动重置为完整窗口，一次作答丝滑过关。');
 }
 
+// --- Test 20: 兼容历史遗留的 ADMIN_UID 逗号分隔配置 ---
+async function testLegacyCommaAdminUidCompatibility() {
+  console.log('--- Test 20: 兼容历史遗留的 ADMIN_UID 逗号分隔配置 ---');
+  const { env } = await createTestBot();
+  const legacyEnv = {
+    ...env,
+    ADMIN_UID: '12345678, 87654321, 999999'
+  };
+  const bot = new BotCore(legacyEnv);
+  assert.strictEqual(bot.adminUid, '12345678', '必须平滑截取首个有效管理员 ID');
+  assert(bot.isAdmin(12345678), '首个管理员 ID 必须正常判定为管理员');
+  assert(!bot.isAdmin(87654321), '非首个管理员 ID 不得获得管理权限');
+  console.log('✓ Passed: 历史逗号分隔配置平滑降级兼容首个 ID 并输出警告，系统运行稳健。');
+}
+
 async function main() {
   await testQuoteReplyContext();
   await testEmojiDynamicQuestion();
@@ -881,7 +898,8 @@ async function main() {
   await testGuestToAdminMultiUserIsolation();
   await testSecurityHardeningAndHtmlEscape();
   await testSetLangOnExpiredQuestionRenewsExpiration();
-  console.log('\n🌟 ALL 19 PRODUCTION TEST SUITES PASSED PERFECTLY (v3.7.1-Shield)!');
+  await testLegacyCommaAdminUidCompatibility();
+  console.log('\n🌟 ALL 20 PRODUCTION TEST SUITES PASSED PERFECTLY (v3.7.2-Shield)!');
 }
 
 main().catch(err => {

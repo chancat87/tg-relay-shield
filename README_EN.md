@@ -8,7 +8,7 @@ A high-performance, zero-cost, anti-abuse contact relay bot built on Cloudflare 
 
 [![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-F38020?logo=cloudflare&logoColor=white)](https://workers.cloudflare.com/)
 [![Telegram Bot API](https://img.shields.io/badge/Telegram-Bot%20API-2CA5E0?logo=telegram&logoColor=white)](https://core.telegram.org/bots/api)
-[![Version](https://img.shields.io/badge/Version-v3.7.1--Shield-blue.svg)](https://github.com/chancat87/tg-relay-shield)
+[![Version](https://img.shields.io/badge/Version-v3.7.2--Shield-blue.svg)](https://github.com/chancat87/tg-relay-shield)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 [中文文档](./README.md) · [Features](#-key-features) · [Deployment](#-quick-deployment) · [Commands](#-admin-commands) · [FAQ](#-faq)
@@ -73,12 +73,12 @@ Engineered with deep optimization specifically for the **Cloudflare Free Plan**:
 | Resource | Cloudflare Free Limit | Per-Interaction Cost in TG-Relay-Shield | Daily Capacity |
 | :--- | :--- | :--- | :--- |
 | **Worker Requests** | 100,000 reqs / day | 1 request per webhook event | 100,000 events / day |
-| **KV Write Ops** | **1,000 writes / day** | Guest message: 2 writes (`msg-map` + `guest-to-admin`)<br>Admin reply: 2 writes (bidirectional mapping) | **~250 – 330 full conversation rounds / day** |
-| **KV Read Ops** | 100,000 reads / day | 2–3 reads per message | 30,000+ messages / day |
+| **KV Write Ops** | **1,000 writes / day** | Guest message: 3 writes (rate limit + `msg-map` + quote map)<br>Admin reply: 2 writes (bidirectional quote mappings) | **~200 – 330 full conversation rounds / day** |
+| **KV Read Ops** | 100,000 reads / day | ~3–6 reads per message (blacklist / session / lang / ratelimit / keywords / map) | 16,000+ messages / day |
 
 ### 🛡️ Why you will never exhaust free quotas:
 1. **Zero-Write Defense**:
-   - Locked-out users clicking buttons: **0 KV writes**;
+   - Locked-out users clicking buttons (including language switch): **100% 0 KV writes**;
    - Unverified users typing text during active CAPTCHAs: **0 KV writes**;
    - Flooding visitors exceeding rate limits: **0 KV writes** (after first warning).
    No spammer or brute-force bot can deplete your Cloudflare free KV write budget.
@@ -91,7 +91,7 @@ Engineered with deep optimization specifically for the **Cloudflare Free Plan**:
 
 ### Prerequisites
 1. Create a bot via [@BotFather](https://t.me/BotFather) and obtain your **`BOT_TOKEN`**.
-2. Message [@userinfobot](https://t.me/userinfobot) to get your numeric Telegram user ID **`ADMIN_UID`** (sole owner admin).
+2. Message [@userinfobot](https://t.me/userinfobot) to get your numeric Telegram user ID **`ADMIN_UID`** (sole owner admin; legacy comma-separated values automatically fallback to the first ID).
 3. Create a secret token string for **`BOT_SECRET`** (e.g. `my_secret_token_8899`, required for setup authentication).
 
 ---

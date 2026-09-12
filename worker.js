@@ -3,7 +3,7 @@
  * 
  * GitHub: https://github.com/chancat87/tg-relay-shield
  * License: MIT
- * Version: 3.7.1-Shield (Pure & Robust)
+ * Version: 3.7.2-Shield (Pure & Robust)
  * 
  * 核心架构特性：
  * 1. 趣味 Emoji 动态视觉算术 (Native Telegram Shield)：
@@ -41,7 +41,7 @@ function getIntEnv(env, name, def, fallbackName = null) {
   return Number.isFinite(v) && v > 0 ? v : def;
 }
 
-const BOT_VERSION = '3.7.1-Shield';
+const BOT_VERSION = '3.7.2-Shield';
 
 function getBeijingTimeStr() {
   const d = new Date(Date.now() + 8 * 3600 * 1000);
@@ -208,7 +208,13 @@ class BotCore {
     }
     this.adminSecret = getEnv(env, 'ADMIN_SECRET') || this.secret;
     
-    this.adminUid = String(getEnv(env, 'ADMIN_UID', 'ENV_ADMIN_UID') || '').trim();
+    const rawAdminUid = String(getEnv(env, 'ADMIN_UID', 'ENV_ADMIN_UID') || '').trim();
+    if (rawAdminUid.includes(',')) {
+      this.adminUid = rawAdminUid.split(',')[0].trim();
+      console.warn(`[TG-Relay-Shield] 检测到 ADMIN_UID 包含逗号分隔值 ("${rawAdminUid}")。系统已精简为单管理员架构，已自动选取首个有效 ID ("${this.adminUid}") 作为唯一管理员。`);
+    } else {
+      this.adminUid = rawAdminUid;
+    }
 
     this.webhookPath = (getEnv(env, 'WEBHOOK_PATH') || '/endpoint').trim();
     if (!this.webhookPath.startsWith('/')) this.webhookPath = '/' + this.webhookPath;
@@ -747,22 +753,21 @@ class BotCore {
     // 1. 访客单键切换语言 (set_lang:zh | set_lang:en)
     if (data.startsWith('set_lang:')) {
       const newLang = data.split(':')[1];
-      lang = await this.setUserLang(userId, newLang);
-
       const vstate = await this.getVerificationState(userId);
 
-      // 1.1 处于 30 分钟锁定状态：严禁出新题，单次强弹窗警示，严禁清零锁定时间与失败计数
+      // 1.1 处于 30 分钟锁定状态：严禁写 KV，严禁出新题，单次强弹窗警示（100% 零写 KV 保护）
       if (vstate && vstate.lockedUntil && Date.now() < vstate.lockedUntil) {
         const waitMin = Math.ceil((vstate.lockedUntil - Date.now()) / 60000);
         await this.api('answerCallbackQuery', {
           callback_query_id: cbq.id,
-          text: t(lang, 'lockoutActive', { min: waitMin }),
+          text: t(newLang === 'zh' ? 'zh' : 'en', 'lockoutActive', { min: waitMin }),
           show_alert: true
         });
         return;
       }
 
-      // 非锁定状态下，单次触发语言切换成功提示 Toast
+      // 未锁定用户才持久化写入语言偏好并弹出切换成功 Toast
+      lang = await this.setUserLang(userId, newLang);
       await this.api('answerCallbackQuery', {
         callback_query_id: cbq.id,
         text: t(lang, 'langSwitched')
