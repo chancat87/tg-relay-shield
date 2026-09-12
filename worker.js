@@ -3,7 +3,7 @@
  * 
  * GitHub: https://github.com/chancat87/tg-relay-shield
  * License: MIT
- * Version: 3.7.0-Shield (Pure & Robust)
+ * Version: 3.7.1-Shield (Pure & Robust)
  * 
  * 核心架构特性：
  * 1. 趣味 Emoji 动态视觉算术 (Native Telegram Shield)：
@@ -41,7 +41,7 @@ function getIntEnv(env, name, def, fallbackName = null) {
   return Number.isFinite(v) && v > 0 ? v : def;
 }
 
-const BOT_VERSION = '3.7.0-Shield';
+const BOT_VERSION = '3.7.1-Shield';
 
 function getBeijingTimeStr() {
   const d = new Date(Date.now() + 8 * 3600 * 1000);
@@ -748,19 +748,10 @@ class BotCore {
     if (data.startsWith('set_lang:')) {
       const newLang = data.split(':')[1];
       lang = await this.setUserLang(userId, newLang);
-      await this.api('answerCallbackQuery', {
-        callback_query_id: cbq.id,
-        text: t(lang, 'langSwitched')
-      });
 
       const vstate = await this.getVerificationState(userId);
 
-      // 1.1 已验证用户：仅切换偏好语言，严禁篡改验证状态，绝不重新出题
-      if (vstate && vstate.verified) {
-        return;
-      }
-
-      // 1.2 处于 30 分钟锁定状态：严禁出新题，严禁清零锁定时间与失败计数
+      // 1.1 处于 30 分钟锁定状态：严禁出新题，单次强弹窗警示，严禁清零锁定时间与失败计数
       if (vstate && vstate.lockedUntil && Date.now() < vstate.lockedUntil) {
         const waitMin = Math.ceil((vstate.lockedUntil - Date.now()) / 60000);
         await this.api('answerCallbackQuery', {
@@ -771,7 +762,22 @@ class BotCore {
         return;
       }
 
-      // 1.3 正常未验证用户：切语言并重绘题目，但必须继承历史 failCount 与到期时间
+      // 非锁定状态下，单次触发语言切换成功提示 Toast
+      await this.api('answerCallbackQuery', {
+        callback_query_id: cbq.id,
+        text: t(lang, 'langSwitched')
+      });
+
+      // 1.2 已验证用户：仅切换偏好语言，严禁篡改验证状态，绝不重新出题
+      if (vstate && vstate.verified) {
+        return;
+      }
+
+      // 1.3 正常未验证用户：切语言并重绘题目
+      // 若原题仍在有效期内，继承剩余有效时间；若原题已超时过期，赋予全新 10 分钟答题窗口
+      const hasValidExp = vstate?.exp && vstate.exp > Date.now();
+      const questionExp = hasValidExp ? vstate.exp : (Date.now() + 10 * 60 * 1000);
+
       const newQ = generateDynamicQuestion(lang);
       const sess = await this.kv.get(`session:${userId}`, { type: 'json' }).catch(() => null);
       const activeSess = sess || { sid: Math.random().toString(36).slice(2, 10), at: Date.now() };
@@ -780,7 +786,7 @@ class BotCore {
         sessionId: activeSess.sid,
         questionId: newQ.id,
         correctIndex: newQ.correctIndex,
-        exp: vstate?.exp || (Date.now() + 10 * 60 * 1000),
+        exp: questionExp,
         verified: false,
         failCount: vstate?.failCount || 0,
         lockedUntil: 0

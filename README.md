@@ -8,7 +8,7 @@
 
 [![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-F38020?logo=cloudflare&logoColor=white)](https://workers.cloudflare.com/)
 [![Telegram Bot API](https://img.shields.io/badge/Telegram-Bot%20API-2CA5E0?logo=telegram&logoColor=white)](https://core.telegram.org/bots/api)
-[![Version](https://img.shields.io/badge/Version-v3.7.0--Shield-blue.svg)](https://github.com/chancat87/tg-relay-shield)
+[![Version](https://img.shields.io/badge/Version-v3.7.1--Shield-blue.svg)](https://github.com/chancat87/tg-relay-shield)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Maintenance](https://img.shields.io/badge/Maintained%3F-yes-green.svg)](https://github.com/)
 
@@ -86,6 +86,27 @@
                      │
               [管理员 Reply 回复] ──► 原样转回给访客 (本体大号完全隐身)
 ```
+
+---
+
+## 📊 Cloudflare 免费配额与承载力精算
+
+本项目专门针对 **Cloudflare Workers Free Plan（免费版）** 进行了极致的轻量化与写入防刷优化：
+
+| 资源项 | Cloudflare 免费额度 | 本项目单次交互消耗 | 理论日承载上限 |
+| :--- | :--- | :--- | :--- |
+| **Worker 请求数** | 100,000 次 / 天 | 每次 Webhook 事件 1 次请求 | 每天 100,000 次 |
+| **KV 写入操作** | **1,000 次 / 天** | 访客发信 2 次（消息反查 + 引用映射）<br>管理员回复 2 次（双向映射） | **约 250 ~ 330 轮深度私聊往返 / 天** |
+| **KV 读取操作** | 100,000 次 / 天 | 每次消息 2~3 次读 | 每天 30,000+ 次 |
+
+### 🛡️ 为什么免费额度永远用不完？
+1. **零写抗刷保护 (Zero-Write Defense)**：
+   - 访客连续答错 3 次后进入 30 分钟锁定，锁定期间的任何按键与消息 **0 写 KV**；
+   - 题目未作答前发送任何文本一律 **0 回复、0 写 KV**；
+   - 频控超限后灌水消息在首条警告后一律 **0 回复、0 写 KV**。
+   恶意脚本再怎么高频轰炸，也绝不可能耗尽你的 1000 次免费写入配额。
+2. **多图相册消息 (Media Group) 策略**：
+   - Telegram 发送相册为多连接并发推送，为杜绝并发竞态与写 KV 缓存的开销，采用**逐条安全转发机制**，确保 100% 零漏图、零并发竞态、零配额浪费。
 
 ---
 

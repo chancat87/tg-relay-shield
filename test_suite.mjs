@@ -674,9 +674,10 @@ async function testSetLangCannotBypassLockout() {
   const state = await env.nfd.get(`verify:${guestChatId}`, { type: 'json' });
   assert.strictEqual(state.lockedUntil, lockedTime, '锁定时间必须完好保留，严禁归零！');
   assert.strictEqual(state.failCount, 3, '失败计数必须完好保留！');
-  const alertToast = callbacksAnswered.find(c => c.callback_query_id === 'cb_unlock_hack' && c.show_alert);
-  assert(alertToast, '必须向攻击者弹出锁定警告');
-  console.log('✓ Passed: 锁定状态下点击语言切换无法逃逸锁定。');
+  const answers = callbacksAnswered.filter(c => c.callback_query_id === 'cb_unlock_hack');
+  assert.strictEqual(answers.length, 1, '锁定用户切换语言必须仅触发单次强警示弹窗，严禁产生气泡+弹窗重复干扰');
+  assert.strictEqual(answers[0].show_alert, true, '必须是强警告弹窗');
+  console.log('✓ Passed: 锁定状态下点击语言切换无法逃逸锁定，且弹窗纯净无重复。');
 }
 
 // --- Test 15: 对抗性防御测试 - 已验证用户点击 set_lang 严禁降级重置 (BUG-1) ---
@@ -812,6 +813,54 @@ async function testSecurityHardeningAndHtmlEscape() {
   console.log('✓ Passed: 敏感词回显 HTML 实体转义严密，BOT_SECRET 缺失时安全阻断。');
 }
 
+// --- Test 19: 过期题目切换语言时有效期刷新与单次作答体验 ---
+async function testSetLangOnExpiredQuestionRenewsExpiration() {
+  console.log('--- Test 19: 过期题目切换语言重出新题有效期刷新闭环 ---');
+  const { bot, env, callbacksAnswered } = await createTestBot();
+  const guestChatId = 88005;
+  const expiredTime = Date.now() - 5000; // 5 秒前已过期
+
+  // 1. 初始化已过期的未验证状态
+  await env.nfd.put(`session:${guestChatId}`, JSON.stringify({ sid: 'sess_exp_lang', at: expiredTime }));
+  await env.nfd.put(`verify:${guestChatId}`, JSON.stringify({
+    sessionId: 'sess_exp_lang',
+    questionId: 'old_expired_qid',
+    correctIndex: 0,
+    exp: expiredTime,
+    verified: false,
+    failCount: 1,
+    lockedUntil: 0
+  }));
+
+  // 2. 用户在已过期的题目上点击 set_lang:en 切换语言
+  await bot.onCallbackQuery({
+    id: 'cb_lang_on_expired',
+    data: 'set_lang:en',
+    from: { id: guestChatId },
+    message: { chat: { id: guestChatId }, message_id: 2002 }
+  });
+
+  const stateAfterLang = await env.nfd.get(`verify:${guestChatId}`, { type: 'json' });
+  assert.strictEqual(stateAfterLang.failCount, 1, '失败计数必须严格保留');
+  assert(stateAfterLang.exp > Date.now() + 8 * 60 * 1000, '过期题目切换语言后，新题目必须被赋予完整有效的答题时效，绝不能沿用过期时间戳！');
+
+  // 3. 用户在新生成的语言题目上直接作答正确答案
+  callbacksAnswered.length = 0;
+  await bot.onCallbackQuery({
+    id: 'cb_ans_after_lang',
+    data: `v:${stateAfterLang.questionId}:${stateAfterLang.correctIndex}`,
+    from: { id: guestChatId },
+    message: { chat: { id: guestChatId }, message_id: 2002 }
+  });
+
+  const finalState = await env.nfd.get(`verify:${guestChatId}`, { type: 'json' });
+  assert.strictEqual(finalState.verified, true, '作答后应直接通过验证！');
+  const expiredToast = callbacksAnswered.find(c => c.text && c.text.includes('已过期'));
+  assert(!expiredToast, '严禁再次判定为过期或刷新题目，一次作答丝滑过关！');
+
+  console.log('✓ Passed: 过期题目切语言时到期时间自动重置为完整窗口，一次作答丝滑过关。');
+}
+
 async function main() {
   await testQuoteReplyContext();
   await testEmojiDynamicQuestion();
@@ -831,7 +880,8 @@ async function main() {
   await testStartPreservesFailCount();
   await testGuestToAdminMultiUserIsolation();
   await testSecurityHardeningAndHtmlEscape();
-  console.log('\n🌟 ALL 18 PRODUCTION TEST SUITES PASSED PERFECTLY (v3.7.0-Shield)!');
+  await testSetLangOnExpiredQuestionRenewsExpiration();
+  console.log('\n🌟 ALL 19 PRODUCTION TEST SUITES PASSED PERFECTLY (v3.7.1-Shield)!');
 }
 
 main().catch(err => {

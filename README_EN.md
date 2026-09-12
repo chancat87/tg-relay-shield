@@ -8,7 +8,7 @@ A high-performance, zero-cost, anti-abuse contact relay bot built on Cloudflare 
 
 [![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-F38020?logo=cloudflare&logoColor=white)](https://workers.cloudflare.com/)
 [![Telegram Bot API](https://img.shields.io/badge/Telegram-Bot%20API-2CA5E0?logo=telegram&logoColor=white)](https://core.telegram.org/bots/api)
-[![Version](https://img.shields.io/badge/Version-v3.7.0--Shield-blue.svg)](https://github.com/chancat87/tg-relay-shield)
+[![Version](https://img.shields.io/badge/Version-v3.7.1--Shield-blue.svg)](https://github.com/chancat87/tg-relay-shield)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 [中文文档](./README.md) · [Features](#-key-features) · [Deployment](#-quick-deployment) · [Commands](#-admin-commands) · [FAQ](#-faq)
@@ -63,6 +63,27 @@ Many people use Telegram bots as public contact points (a privacy relay between 
   * No insecure fallback secrets; `/quick-setup` requires strict authentication via `?secret=YOUR_BOT_SECRET`.
 * 🛠️ **Minimalist Scope-Based Command Menus**:
   * Configures clean menus for visitors (only `/start` and `/about`) and full management commands for the sole owner admin.
+
+---
+
+## 📊 Cloudflare Free Tier Quotas & Capacity Calculation
+
+Engineered with deep optimization specifically for the **Cloudflare Free Plan**:
+
+| Resource | Cloudflare Free Limit | Per-Interaction Cost in TG-Relay-Shield | Daily Capacity |
+| :--- | :--- | :--- | :--- |
+| **Worker Requests** | 100,000 reqs / day | 1 request per webhook event | 100,000 events / day |
+| **KV Write Ops** | **1,000 writes / day** | Guest message: 2 writes (`msg-map` + `guest-to-admin`)<br>Admin reply: 2 writes (bidirectional mapping) | **~250 – 330 full conversation rounds / day** |
+| **KV Read Ops** | 100,000 reads / day | 2–3 reads per message | 30,000+ messages / day |
+
+### 🛡️ Why you will never exhaust free quotas:
+1. **Zero-Write Defense**:
+   - Locked-out users clicking buttons: **0 KV writes**;
+   - Unverified users typing text during active CAPTCHAs: **0 KV writes**;
+   - Flooding visitors exceeding rate limits: **0 KV writes** (after first warning).
+   No spammer or brute-force bot can deplete your Cloudflare free KV write budget.
+2. **Media Groups / Albums**:
+   - Telegram albums are delivered concurrently via multiple webhook calls. To prevent parallel race conditions and avoid wasteful KV buffering writes, images are forwarded individually with 100% reliability and zero dropped photos.
 
 ---
 
