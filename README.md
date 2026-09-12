@@ -2,210 +2,167 @@
 
 # 🛡️ TG-Relay-Shield
 
-**Telegram 双向私聊中转与智能防骚扰机器人**
+**Telegram 私聊中转与防骚扰机器人**
 
-基于 Cloudflare Workers + KV 构建的高性能、零成本、原生防骚扰的双向客服中继机器人。
+基于 Cloudflare Workers + KV 构建，轻量运行、完全免费。
 
 [![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-F38020?logo=cloudflare&logoColor=white)](https://workers.cloudflare.com/)
 [![Telegram Bot API](https://img.shields.io/badge/Telegram-Bot%20API-2CA5E0?logo=telegram&logoColor=white)](https://core.telegram.org/bots/api)
 [![Version](https://img.shields.io/badge/Version-v3.7.2--Shield-blue.svg)](https://github.com/chancat87/tg-relay-shield)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Maintenance](https://img.shields.io/badge/Maintained%3F-yes-green.svg)](https://github.com/)
 
-[English Documentation](./README_EN.md) · [功能特性](#-核心特性) · [部署教程](#-快速部署) · [管理员指令](#-管理员指令) · [常见问题](#-常见问题-faq)
+[English](./README_EN.md) · [功能](#-核心功能) · [技术与配额](#-技术架构与配额) · [部署](#-部署教程) · [指令与示例](#-指令与使用示例) · [FAQ](#-常见问题)
 
 </div>
 
 ---
 
-### 💡 为什么诞生本项目？
+## 📌 核心功能
 
-在 Telegram 上，许多人需要一个公开机器人作为与外界陌生人沟通的窗口（类似于客服或私聊替身）。以往大家常使用 `nodeforwardbot` 等传统项目，但近期遭遇了严重的**自动化广告脚本轰炸**：
-* ❌ **无验证门槛**：任何广告群发脚本都可以直接向你的 Telegram 轰炸几百条垃圾信息。
-* ❌ **题目写死易破解**：部分防骚扰项目只有 10 道写死问答，脚本直接暴力枚举盲猜，几秒即可破门。
-* ❌ **配额耗尽攻击**：Cloudflare 免费版每天只有 1000 次 KV 写入配额。旧版脚本连点答错会无限写 KV，容易被恶意脚本刷爆免费额度。
-* ❌ **明文通知激化矛盾**：拉黑时主动通知对方“你已被拉黑”，直接导致黑产团伙换小号二次轰炸。
-
-**TG-Relay-Shield 正是为彻底解决上述所有痛点而生的现代化解决方案！**
-
----
-
-## ✨ 核心特性
-
-* 🚀 **100% 纯 Serverless 免费运行**：无需购买 VPS，无需维护 Docker，基于 Cloudflare Workers 全免费额度即可平稳支撑。
-* 🍓 **趣味 Emoji 动态视觉算术 (Native Telegram Shield)**：
-  * 原生内嵌于 Telegram 消息按键交互，**零外部跳转、零网页加载、零第三方依赖**，杜绝任何网络阻断与跨地域延迟！
-  * 采用 16 种无歧义通用 Emoji 动态生成（如 `🍎🍎 + 🍎🍎🍎 = ?`）。
-  * 题目文本**完全不含任何阿拉伯数字**，彻底废掉传统正则爬虫；按键选项则采用**纯标准数字**（如 `[ 5 ]`），人类 0.5 秒心算秒点，极佳操作体验。
-  * 兼顾极速体验与防刷，**绝不误伤任何正常文章、博客或教程链接交流**。
-* 💬 **双向原生引用回复 (Native Quote Reply)**：
-  * 基于 Telegram Bot API 7.0 原生 `reply_parameters`，无论是管理员回复访客，还是访客在对话中长按 Reply 引用历史消息，均在双方聊天中完美呈现原生引用回复气泡，真实镜像打通，零虚假文本拼接。
-* 🔕 **防刷屏会话静默回执（与 3 小时验证生命周期统一）**：
-  * 彻底解决连续发信时频繁提示“请耐心等待回复”的刷屏痛点。验证通过瞬间一次性交付等待提示，随后的 3 小时验证会话期内 100% 静默转达，聊天体验丝滑如私聊好友。
-* ⚡ **3 次答错熔断锁死 (Anti-DDoS) 与 60 秒限频 (Rate Limiting)**：
-  * 连续答错 3 次自动熔断锁定 30 分钟，锁定期间对恶意连点实施零写 KV 静默拦截，保卫免费额度。
-  * 访客发言频率实施滑动窗口限流（默认 60 秒最多 20 条，带超限零写 KV 保护），秒级阻断脚本灌水轰炸，保护 Telegram 账号安全。
-* 🛡️ **生产环境彻底废除 /reset 与出题漏洞**：
-  * 彻底移除访客菜单中的 `/reset` 指令与界面重测按钮，访客端仅保留 `/start` 与 `/about`。已验证用户发信仅作普通文本转发，从根源切断脚本刷题消耗 KV 的漏洞。
-* 🌐 **纯正双语隔离与自适应一键切换**：
-  * 访客端与管理端 100% 语言纯净隔离，绝无中英串行混合。
-  * 自动识别访客客户端语言直接以母语出题，答题键盘底端附带 `[ 🌐 Switch to English ]`，点选后在当前气泡就地重绘。
-* 🥷 **静默拉黑（影子屏蔽 / Shadowban）**：
-  * 管理员执行 `/block` 后，系统只在管理端确认，**绝不通知被拉黑者**。对方发信看似正常，机器人后台静默忽略，彻底切断换号轰炸动机。
-* 🔒 **隐私保护与匿名回复**：
-  * 即使对方开启了 Telegram 的“转发时隐藏账号来源”，底层基于消息映射依然能精准双向回传，你的本体大号对外界 100% 隐身。
-* 🧱 **多访客消息命名空间物理隔离**：
-  * 底层采用 `guest-to-admin:${chatId}:${msgId}` 复合键隔离，即使多位陌生访客产生相同 Telegram 消息 ID，在底层也绝不串线。
-* 🛡️ **安全闭环状态机（防爆破逃逸与防刷）**：
-  * 切换语言或重新执行 `/start` 严格继承已有失败计数，杜绝恶意脚本通过刷新洗白答错记录。
-  * 被锁定用户严禁通过切换语言逃逸 30 分钟惩罚；已验证用户切换母语无损保留通行权，杜绝逆向降级漏洞。
-* 🛑 **频控告警去抖（Debounce）与端点安全鉴权**：
-  * 频控超限警告单窗口期内仅提醒一次，后续刷屏静默丢弃（0 回复、0 写库），切断被恶意利用刷 API 发信配额的攻击面。
-  * 废除弱默认密钥（Fail-Closed 原则），`/quick-setup` 实施基于 `BOT_SECRET` 的严格安全鉴权。
-* 🛠️ **极简身份隔离菜单体系 (Scope-based)**：
-  * 自动为普通访客（极简 `/start` 启动会话、`/about` **关于**）与个人专属管理员（专属 `/block`、`/unblock`、`/addkw`、`/delkw`、`/listkw`、`/help` 等）配置物理隔离的操作指令菜单。
+- **动态 Emoji 人机验证**：
+  - 题目采用纯 Emoji 动态生成（如 `🍎🍎 + 🍎 = ?`），不含阿拉伯数字，防正则爬虫。
+  - 原生 Telegram 键盘 4 选 1 点击作答，无需跳转外部网页。
+  - 验证通过后 3 小时免测，期间消息静默转达，不重复刷屏。
+- **双向原生引用回复 (Quote Reply)**：
+  - 管理员与访客回复时，均在对方窗口生成真实的原生 Telegram 引用气泡。
+  - 访客端开启“转发隐藏来源”也能正常双向回传，管理员大号完全隐身。
+- **影子拉黑 (Shadowban)**：
+  - 管理员使用 `/block` 后，系统只在管理端确认，不向访客发送任何拉黑提示。
+  - 被拉黑访客后续发信直接静默丢弃。
+- **零写 KV 防刷保护**：
+  - 访客连续答错 3 次自动锁定 30 分钟。
+  - 锁定期间、题目未答前、以及频控超限后，发信与按钮点击均严格 0 写 KV，防止恶意消耗 Cloudflare 免费配额。
+- **中英双语自适应**：
+  - 根据访客客户端语言自动选择中文或英文出题，键盘内嵌切换按钮，点选就地重绘。
+- **单管理员专属架构**：
+  - 仅服务绑定的唯一管理员，管理指令与普通访客菜单物理隔离。
+- **敏感词动态拦截**：
+  - 支持管理员通过指令动态添加/删除拦截词，命中消息静默拦截。
 
 ---
 
-## 🏗️ 数据流向图
+## 🛠️ 技术架构与配额
 
+### 运行环境
+- **Runtime**：Cloudflare Workers (V8 Serverless)
+- **存储**：Cloudflare Workers KV (键值数据库)
+- **通信**：Telegram Bot API (Webhook)
+
+### 数据流向
 ```text
-[陌生访客私聊发信]
-       │
-       ├─► 1. 检查静默黑名单 (block:<uid>) ──(命中)──► [静默忽略，不响应，不转发]
-       │
-       ├─► 2. 检查会话与人机验证
-       │        ├─► [未验证] ──► 动态出题 (A+B / A-B 随机邻近干扰项，4选1按钮)
-       │        │                   ├─ 连续错 3 次 ──► [触发熔断锁定 30 分钟，冻结写入]
-       │        │                   └─ 答对 ───────► [放行，3 小时内免试]
-       │        └─► [已通过] ──► 放行
-       │
-       ├─► 3. 内存频控 + 敏感词过滤
-       │
-       └─► 4. 消息安全转发至管理员私聊
-                     │
-              [管理员 Reply 回复] ──► 原样转回给访客 (本体大号完全隐身)
+访客发信 ──► 检查黑名单 ──► 检查人机验证 (Emoji 题目) ──► 频控与敏感词过滤 ──► 转发至管理员
+                                                                        │
+访客接收 ◄────────────────────── 真实引用回传 ──────────────────────── 管理员 Reply 回复
 ```
 
----
+### 免费配额与消耗
+针对 Cloudflare 免费版（每天 1,000 次 KV 写入、100,000 次请求）优化：
 
-## 📊 Cloudflare 免费配额与承载力精算
-
-本项目专门针对 **Cloudflare Workers Free Plan（免费版）** 进行了极致的轻量化与写入防刷优化：
-
-| 资源项 | Cloudflare 免费额度 | 本项目单次交互消耗 | 理论日承载上限 |
+| 交互类型 | KV 写入 | KV 读取 | 承载能力 |
 | :--- | :--- | :--- | :--- |
-| **Worker 请求数** | 100,000 次 / 天 | 每次 Webhook 事件 1 次请求 | 每天 100,000 次 |
-| **KV 写入操作** | **1,000 次 / 天** | 访客发信 3 次（频控计数 1 次 + 消息反查 1 次 + 引用映射 1 次）<br>管理员回复 2 次（双向映射各 1 次） | **约 200 ~ 330 轮深度私聊往返 / 天** |
-| **KV 读取操作** | 100,000 次 / 天 | 每次消息约 3 ~ 6 次读（黑名单/会话/语言/频控/敏感词/映射） | 每天 16,000+ 次 |
+| **访客发信** | 3 次（频控 1 次 + 消息映射 2 次） | 约 3~6 次 | — |
+| **管理员回复** | 2 次（双向消息回查映射） | 约 2~3 次 | — |
+| **锁定与违规拦截** | **0 次（零写保护）** | 1 次 | 不耗费写配额 |
+| **综合估算** | — | — | **每天约 200 ~ 330 轮完整私聊往返** |
 
-### 🛡️ 为什么免费额度永远用不完？
-1. **零写抗刷保护 (Zero-Write Defense)**：
-   - 访客连续答错 3 次后进入 30 分钟锁定，锁定期间的任何按键（包括点击切换语言）与消息 **100% 0 写 KV**；
-   - 题目未作答前发送任何文本一律 **0 回复、0 写 KV**；
-   - 频控超限后灌水消息在首条警告后一律 **0 回复、0 写 KV**。
-   恶意脚本再怎么高频轰炸，也绝不可能耗尽你的 1000 次免费写入配额。
-2. **多图相册消息 (Media Group) 策略**：
-   - Telegram 发送相册为多连接并发推送，为杜绝并发竞态与写 KV 缓存的开销，采用**逐条安全转发机制**，确保 100% 零漏图、零并发竞态、零配额浪费。
+*注：Telegram 相册消息（Media Group）按单张图片逐条转发，确保高并发下不漏图且不产生额外的 KV 缓冲写入。*
 
 ---
 
-## 🚀 快速部署
+## 🚀 部署教程
 
-### 准备工作（1 分钟）
-1. 在 Telegram 找 [@BotFather](https://t.me/BotFather) 发送 `/newbot` 创建机器人，获取 **`BOT_TOKEN`**。
-2. 在 Telegram 找 [@userinfobot](https://t.me/userinfobot) 发送任意消息，获取你的纯数字用户 ID **`ADMIN_UID`**（个人唯一管理员；若历史配置了逗号隔开的多 UID，系统会自动截取首个 ID 并提示）。
-3. 自定义一个随机密钥字符串 **`BOT_SECRET`**（如 `my_secret_key_8899`，必填，用于接口防伪鉴权）。
+### 1. 准备配置参数
+- **`BOT_TOKEN`**：在 Telegram 找 [@BotFather](https://t.me/BotFather) 创建机器人获取。
+- **`ADMIN_UID`**：在 Telegram 找 [@userinfobot](https://t.me/userinfobot) 获取你的纯数字 ID（单管理员；若配置了逗号隔开的多 UID，系统自动截取首个）。
+- **`BOT_SECRET`**：自定义一段随机密钥字符串（如 `my_secret_token_8899`，用于接口防伪鉴权）。
 
 ---
 
-### 方式 A：Web 网页零代码部署（新手推荐，3 分钟）
+### 2. 方式 A：Web 网页部署（新手推荐）
 
 1. **创建 KV 数据库**：
-   * 登录 [Cloudflare 控制台](https://dash.cloudflare.com/)，在左侧点击 **存储和数据库** $\rightarrow$ **KV**。
-   * 点击 **创建命名空间**，命名为 `tg-relay-kv`，点击添加。
+   - 登录 [Cloudflare 控制台](https://dash.cloudflare.com/)，点击 **存储和数据库** $\rightarrow$ **KV**。
+   - 点击 **创建命名空间**，名称输入 `tg-relay-kv`。
 
 2. **创建 Worker**：
-   * 点击 **Workers 和 Pages** $\rightarrow$ **创建应用程序** $\rightarrow$ **创建 Worker**。
-   * 命名为 `tg-relay-shield`，点击 **部署**。
-   * 点击 **编辑代码**，清空默认内容，将本项目中的 [`worker.js`](./worker.js) **全选复制粘贴进去**，点击右上角 **Deploy（部署）**。
+   - 点击 **Workers 和 Pages** $\rightarrow$ **创建应用程序** $\rightarrow$ **创建 Worker**。
+   - 命名为 `tg-relay-shield`，点击 **部署**。
+   - 点击 **编辑代码**，清空原有代码，将本项目 [`worker.js`](./worker.js) 的全部内容粘贴进去，点击右上角 **Deploy（部署）**。
 
-3. **绑定 KV 与环境变量**：
-   * 回到该 Worker 的 **设置 (Settings)** 页面：
-   * **绑定 KV**：在 **绑定 (Bindings)** 中添加 KV 命名空间，**变量名称必须严格填写为 `nfd`**，空间选择刚才创建的 `tg-relay-kv`。
-   * **添加环境变量**：在 **变量和机密 (Variables and Secrets)** 中添加以下变量：
-     * `BOT_TOKEN`: 你的机器人 Token（必填）
-     * `ADMIN_UID`: 你的 Telegram 纯数字 ID（必填，个人管理员账号）
-     * `BOT_SECRET`: 你设定的密钥字符串（必填）
-   * 点击 **保存并部署**。
+3. **绑定变量**：
+   - 进入该 Worker 的 **设置 (Settings)** 页面：
+   - **绑定 KV**：在 **绑定 (Bindings)** 中添加 KV 空间，**变量名必须填 `nfd`**，空间选择刚才创建的 `tg-relay-kv`。
+   - **添加环境变量**：在 **变量和机密 (Variables and Secrets)** 中添加以下三个变量：
+     - `BOT_TOKEN`：你的机器人 Token
+     - `ADMIN_UID`：你的 Telegram 纯数字 ID
+     - `BOT_SECRET`：自定义的密钥字符串
+   - 点击 **保存并部署**。
 
-4. **一键激活（自动配置全量权限）**：
-   * （推荐绑定自定义域名，例如 `tg.aichi.de5.net`，在 Worker 设置中绑定即可）。
-   * 直接在浏览器访问（带上设定的密钥）：
+4. **激活 Webhook 与指令菜单**：
+   - 在浏览器访问：
      ```text
-     https://你的域名/quick-setup?secret=你的BOT_SECRET
+     https://<你的 Worker 域名>/quick-setup?secret=<你的 BOT_SECRET>
      ```
-   * 看到返回 `{"ok": true, "result": true, "description": "Webhook was set"}` 即大功告成！
+   - 看到返回 `{"ok": true, "result": true, "description": "Webhook was set"}` 即完成配置。
 
 ---
 
-### 方式 B：Wrangler CLI 命令行部署（开发者推荐）
+### 3. 方式 B：Wrangler CLI 部署（开发者推荐）
 
 ```bash
-# 1. 克隆本项目
-git clone https://github.com/your-username/tg-relay-shield.git
+# 1. 克隆代码并安装依赖
+git clone https://github.com/chancat87/tg-relay-shield.git
 cd tg-relay-shield
-
-# 2. 安装依赖
 npm install
 
-# 3. 创建远程 KV 命名空间
+# 2. 创建 KV 命名空间
 npx wrangler kv:namespace create nfd
-# 将终端返回的 kv_namespaces id 填入 wrangler.toml
+# 将终端返回的 kv 命名空间 id 写入 wrangler.toml
 
-# 4. 配置机密环境变量
+# 3. 设置机密变量
 npx wrangler secret put BOT_TOKEN
 npx wrangler secret put BOT_SECRET
 npx wrangler secret put ADMIN_UID
 
-# 5. 一键发布
+# 4. 发布
 npm run deploy
+
+# 5. 激活（替换为你自己的域名和密钥）
+curl "https://<你的 Worker 域名>/quick-setup?secret=<你的 BOT_SECRET>"
 ```
 
-发布后，在浏览器访问 `https://<你的 Worker 地址>/quick-setup?secret=你的BOT_SECRET` 即可完成初始化。
-
 ---
 
-## 📋 管理员指令
+## 📋 指令与使用示例
 
-所有指令直接在**你本人与机器人的私聊窗口**中使用：
+所有管理指令直接在**管理员与机器人的私聊窗口**中使用：
 
-| 指令 | 触发方式 | 功能说明 |
+| 操作 / 指令 | 使用示例 | 说明 |
 | :--- | :--- | :--- |
-| **直接回复消息** | 长按转发消息点 **Reply** | 将打字内容无感回复给对应访客（支持图片/文件/文本） |
-| **`/block`** | 回复某条转发消息 **或** 追加 UID | **【静默拉黑（影子屏蔽）】**<br>拉黑该账号，对方发信被静默丢弃，绝不发通知刺激对方 |
-| **`/unblock`** | 回复某条转发消息 **或** 追加 UID | **解除屏蔽**，并自动重置该用户的错误锁定计数 |
-| **`/addkw <词>`** | `/addkw 兼职` | **添加敏感词**，命中该词的消息直接拦截不推送 |
-| **`/delkw <词>`** | `/delkw 兼职` | **删除敏感词**，移除已配置的拦截词 |
-| **`/listkw`** | 直接发送 `/listkw` | 查看当前所有本地拦截词 |
-| **`/help`** | 直接发送 `/help` | 查看管理员帮助手册 |
-| **`/about`** | 直接发送 `/about` | 查看系统运行版本、防御引擎与状态指标 |
+| **回复访客** | 长按转发的消息选择 **Reply** 并打字 | 原样转发给访客，支持文本、表情、图片、语音、文档 |
+| **`/block`** | 回复某条转发消息发送 `/block`<br>或直接发送 `/block 12345678` | 静默拉黑该访客，不向对方发送通知 |
+| **`/unblock`** | 回复某条转发消息发送 `/unblock`<br>或直接发送 `/unblock 12345678` | 解除拉黑，并清空该用户的答错锁定计数 |
+| **`/addkw <词>`** | `/addkw 兼职` | 添加本地敏感拦截词，访客消息命中即拦截 |
+| **`/delkw <词>`** | `/delkw 兼职` | 删除已添加的敏感词 |
+| **`/listkw`** | `/listkw` | 列出当前所有拦截词 |
+| **`/help`** | `/help` | 查看管理员操作指南 |
+| **`/about`** | `/about` | 查看系统运行版本与状态 |
 
 ---
 
-## ❓ 常见问题 (FAQ)
+## ❓ 常见问题
 
-#### Q1: 为什么点击验证按钮转圈卡住没反应？
-**A**: 这是因为 Telegram Webhook 缺少了 `callback_query` 权限。请直接在浏览器中打开：`https://你的域名/quick-setup?secret=你的BOT_SECRET`，接口会自动更新精准的 `allowed_updates` 权限并完成修复。
+**Q: 为什么点击验证按钮转圈无反应？**  
+A: Telegram Webhook 缺少 `callback_query` 权限。请访问 `https://<你的域名>/quick-setup?secret=<你的 BOT_SECRET>` 自动修复。
 
-#### Q2: 我需要自建 VPS 服务器或者搞 Docker 吗？
-**A**: **完全不需要！** 本项目 100% 运行在 Cloudflare Workers 上，Cloudflare 每天提供 10 万次免费请求，对于个人私聊客服用途完全免费且永不断线。
+**Q: 访问 `/quick-setup` 返回 403？**  
+A: 必须携带 URL 参数 `?secret=...`，且参数值必须与环境变量中配置的 `BOT_SECRET` 完全一致。
 
-#### Q3: 为什么拉黑用户后，对方发消息没有收到“您已被拉黑”？
-**A**: 这是专门设计的**影子屏蔽（Shadowban）机制**。直接提示拉黑会激化矛盾，促使广告号立即换小号继续轰炸；静默拦截让对方以为消息发出了但无人理会，防御效果最佳。
+**Q: 需要自己买 VPS 或搭环境吗？**  
+A: 不需要。100% 运行在 Cloudflare Workers 免费额度内，无需服务器。
 
 ---
 
-## 📄 开源许可证
+## 📄 License
 
-本项目基于 [MIT License](./LICENSE) 协议开源。欢迎 Star ⭐️ 与 Fork，提出 PR 共同改进！
+[MIT License](./LICENSE)

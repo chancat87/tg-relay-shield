@@ -2,174 +2,162 @@
 
 # 🛡️ TG-Relay-Shield
 
-**Telegram Two-Way Relay & Anti-Spam Bot**
+**Telegram Relay & Anti-Abuse Bot**
 
-A high-performance, zero-cost, anti-abuse contact relay bot built on Cloudflare Workers + KV.
+Serverless, lightweight, and zero-cost relay bot built on Cloudflare Workers + KV.
 
 [![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-F38020?logo=cloudflare&logoColor=white)](https://workers.cloudflare.com/)
 [![Telegram Bot API](https://img.shields.io/badge/Telegram-Bot%20API-2CA5E0?logo=telegram&logoColor=white)](https://core.telegram.org/bots/api)
 [![Version](https://img.shields.io/badge/Version-v3.7.2--Shield-blue.svg)](https://github.com/chancat87/tg-relay-shield)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-[中文文档](./README.md) · [Features](#-key-features) · [Deployment](#-quick-deployment) · [Commands](#-admin-commands) · [FAQ](#-faq)
+[中文文档](./README.md) · [Features](#-features) · [Tech & Quotas](#-tech-stack--quotas) · [Deployment](#-deployment) · [Commands](#-commands--usage-examples) · [FAQ](#-faq)
 
 </div>
 
 ---
 
-### 💡 Why TG-Relay-Shield?
+## 📌 Features
 
-Many people use Telegram bots as public contact points (a privacy relay between strangers and their personal accounts). Traditional tools like `nodeforwardbot` suffer from severe automated spam issues:
-* ❌ **No Verification Gates**: Spam bots blast hundreds of ads right into your private chat.
-* ❌ **Hardcoded & Predictable CAPTCHAs**: Bots easily brute-force static 10-question pools.
-* ❌ **Free Quota Exhaustion (Denial-of-Wallet)**: Cloudflare Free Plan allows only 1,000 KV writes/day. Old scripts wrote to KV on every incorrect button click, easily exhausting free tier quotas.
-* ❌ **Spammer Escalation**: Informing spammers that they have been blocked only encourages them to rotate sockpuppet accounts immediately.
-
-**TG-Relay-Shield is engineered specifically to eliminate every single one of these problems.**
-
----
-
-## ✨ Key Features
-
-* 🚀 **100% Serverless & Free**: No VPS or Docker required. Runs seamlessly within Cloudflare Workers' generous free tier.
-* 🍓 **Visual Emoji Arithmetic (Native Telegram Shield)**:
-  * 100% native Telegram inline interaction. **Zero external web redirects, zero browser popups, zero 3rd-party dependencies**, and immune to cross-region latency.
-  * Dynamic math problems using 16 clean, universal emojis (e.g. `🍎🍎 + 🍎🍎🍎 = ?`).
-  * Text contains **zero digits**, completely breaking naive regex scrapers. Options are **clean Arabic numbers** (`[ 5 ]`), allowing humans to solve in 0.5s without squinting.
-  * **Zero false positives on normal article/blog link discussions**.
-* 💬 **Native Bidirectional Quote Replies (Telegram API 7.0)**:
-  * Powered by native Telegram Bot API 7.0 `reply_parameters`. Whether the admin replies to a visitor or a visitor quotes historical messages via native Telegram Reply, genuine quote bubbles are rendered flawlessly in both directions with zero fake text.
-* 🔕 **Flood-Free Silent Window (Aligned with 3-Hour Verified Session)**:
-  * Solves notification flooding by delivering the acknowledgment at the moment of verification. Throughout the 3-hour verified session, messages are relayed 100% silently with zero robotic interruptions.
-* ⚡ **3-Strike Lockout & 60s Sliding-Window Rate-Limiting**:
-  * 3 consecutive wrong answers triggers an instant 30-minute lockout with zero KV writes to protect quotas.
-  * Visitor message rate is limited to 20 msgs/min with zero-KV-write overflow protection to prevent flood attacks and avoid Telegram 429 penalties.
-* 🛡️ **Complete Removal of /reset Attack Vector**:
-  * Fully removed `/reset` command and re-verify buttons for visitors. Verified guests cannot be forced into re-verification by malicious scripts.
-* 🌐 **100% Pure Bilingual Isolation & 1-Tap Switcher**:
-  * Clean language isolation for English and Chinese users without mixed bilingual text.
-  * Auto-detects client language with a seamless `[ 🌐 Switch Language ]` button right inside the verification keypad.
-* 🥷 **Silent Shadowbanning**:
-  * Blocking someone via `/block` silences their messages without alerting them, removing the incentive to switch accounts.
-* 🔒 **Complete Admin Anonymity**:
-  * Supports replying even if the visitor has enabled "Hide Account on Forwarding". Your real Telegram identity remains 100% private.
-* 🧱 **Visitor Namespace Isolation**:
-  * Employs `guest-to-admin:${chatId}:${msgId}` composite keys, ensuring multi-guest messages with identical Telegram message IDs never collide or cross-thread.
-* 🛡️ **Hardened Verification State Machine**:
-  * Switching languages or triggering `/start` strictly preserves existing failure counts (`failCount`), preventing spammers from evading penalties by reloading.
-  * Locked users cannot bypass the 30-minute cooling window; verified users never get degraded when switching UI languages.
-* 🛑 **Debounced Rate-Limit Alerts & Fail-Closed Secrets**:
-  * Rate-limit flood warnings are issued at most once per window; excessive messages thereafter are dropped completely silently (0 replies, 0 KV writes).
-  * No insecure fallback secrets; `/quick-setup` requires strict authentication via `?secret=YOUR_BOT_SECRET`.
-* 🛠️ **Minimalist Scope-Based Command Menus**:
-  * Configures clean menus for visitors (only `/start` and `/about`) and full management commands for the sole owner admin.
+- **Dynamic Emoji Verification**:
+  - Dynamically generated emoji math problems (e.g. `🍎🍎 + 🍎 = ?`) with zero digits in problem text.
+  - Native 4-option inline keyboard in Telegram, zero external redirects.
+  - 3-hour verification session with silent forwarding after passing.
+- **Native Bidirectional Quote Reply**:
+  - Renders true native Telegram reply bubbles in both directions via API 7.0 `reply_parameters`.
+  - Full anonymity for admin even when guests hide account sources on forwarding.
+- **Silent Shadowbanning**:
+  - `/block` silences users without alerting them, dropping future messages silently.
+- **Zero-Write Quota Defense**:
+  - 3 consecutive failed answers triggers a 30-minute lockout.
+  - During lockout, active CAPTCHA, or rate limit flooding, button clicks and text messages incur strictly 0 KV writes.
+- **Bilingual Adaptive UI**:
+  - Auto-selects English or Chinese based on client language with an in-place switch button.
+- **Single-Admin Architecture**:
+  - Dedicated to a single owner admin, strictly isolating admin commands from visitor menus.
+- **Dynamic Keyword Filtering**:
+  - Add/delete spam keywords via admin commands on the fly.
 
 ---
 
-## 📊 Cloudflare Free Tier Quotas & Capacity Calculation
+## 🛠️ Tech Stack & Quotas
 
-Engineered with deep optimization specifically for the **Cloudflare Free Plan**:
+### Architecture
+- **Runtime**: Cloudflare Workers (V8 Serverless)
+- **Storage**: Cloudflare Workers KV
+- **Protocol**: Telegram Bot API (Webhook)
 
-| Resource | Cloudflare Free Limit | Per-Interaction Cost in TG-Relay-Shield | Daily Capacity |
+### Data Flow
+```text
+Guest Message ──► Blacklist Check ──► Emoji CAPTCHA ──► Rate Limit & Keywords ──► Forward to Admin
+                                                                                          │
+Guest Receives ◄───────────────────── Native Quote Reply ──────────────────────── Admin Reply
+```
+
+### Free Tier Cost & Capacity
+Optimized for Cloudflare Workers Free Plan (1,000 writes/day, 100,000 reqs/day):
+
+| Operation | KV Writes | KV Reads | Estimated Capacity |
 | :--- | :--- | :--- | :--- |
-| **Worker Requests** | 100,000 reqs / day | 1 request per webhook event | 100,000 events / day |
-| **KV Write Ops** | **1,000 writes / day** | Guest message: 3 writes (rate limit + `msg-map` + quote map)<br>Admin reply: 2 writes (bidirectional quote mappings) | **~200 – 330 full conversation rounds / day** |
-| **KV Read Ops** | 100,000 reads / day | ~3–6 reads per message (blacklist / session / lang / ratelimit / keywords / map) | 16,000+ messages / day |
+| **Guest Message** | 3 writes (rate limit + 2 msg maps) | ~3–6 reads | — |
+| **Admin Reply** | 2 writes (bidirectional maps) | ~2–3 reads | — |
+| **Lockout / Blocked** | **0 writes (zero-write shield)** | 1 read | No quota consumed |
+| **Overall** | — | — | **~200 – 330 full conversation rounds / day** |
 
-### 🛡️ Why you will never exhaust free quotas:
-1. **Zero-Write Defense**:
-   - Locked-out users clicking buttons (including language switch): **100% 0 KV writes**;
-   - Unverified users typing text during active CAPTCHAs: **0 KV writes**;
-   - Flooding visitors exceeding rate limits: **0 KV writes** (after first warning).
-   No spammer or brute-force bot can deplete your Cloudflare free KV write budget.
-2. **Media Groups / Albums**:
-   - Telegram albums are delivered concurrently via multiple webhook calls. To prevent parallel race conditions and avoid wasteful KV buffering writes, images are forwarded individually with 100% reliability and zero dropped photos.
+*Note: Media groups (albums) are forwarded photo-by-photo to prevent parallel race conditions and eliminate wasteful KV buffering.*
 
 ---
 
-## 🚀 Quick Deployment
+## 🚀 Deployment
 
-### Prerequisites
-1. Create a bot via [@BotFather](https://t.me/BotFather) and obtain your **`BOT_TOKEN`**.
-2. Message [@userinfobot](https://t.me/userinfobot) to get your numeric Telegram user ID **`ADMIN_UID`** (sole owner admin; legacy comma-separated values automatically fallback to the first ID).
-3. Create a secret token string for **`BOT_SECRET`** (e.g. `my_secret_token_8899`, required for setup authentication).
+### 1. Prerequisites
+- **`BOT_TOKEN`**: From [@BotFather](https://t.me/BotFather).
+- **`ADMIN_UID`**: Your numeric Telegram user ID from [@userinfobot](https://t.me/userinfobot) (single admin; legacy comma-separated entries automatically fallback to the first ID).
+- **`BOT_SECRET`**: A random secret token string (e.g. `my_secret_token_8899`) for webhook authentication.
 
 ---
 
-### Method A: No-Code Web Deployment (Recommended, 3 mins)
+### 2. Method A: Web Deployment (Recommended)
 
 1. **Create KV Namespace**:
-   * In [Cloudflare Dashboard](https://dash.cloudflare.com/), navigate to **Storage & Databases** $\rightarrow$ **KV**.
-   * Click **Create a Namespace**, name it `tg-relay-kv`, and save.
+   - In Cloudflare Dashboard, go to **Storage & Databases** $\rightarrow$ **KV**.
+   - Create a namespace named `tg-relay-kv`.
 
-2. **Create Cloudflare Worker**:
-   * Go to **Workers & Pages** $\rightarrow$ **Create Application** $\rightarrow$ **Create Worker**.
-   * Name it `tg-relay-shield`, click **Deploy**.
-   * Click **Edit Code**, clear the default code, paste the contents of [`worker.js`](./worker.js), and click **Deploy**.
+2. **Create Worker**:
+   - Go to **Workers & Pages** $\rightarrow$ **Create Worker**, named `tg-relay-shield`.
+   - Paste the contents of [`worker.js`](./worker.js) and click **Deploy**.
 
-3. **Configure KV & Environment Variables**:
-   * Under Worker **Settings** $\rightarrow$ **Bindings**:
-     * Add KV Namespace binding: **Variable Name must be `nfd`**, Namespace: `tg-relay-kv`.
-   * Under **Variables and Secrets**:
-     * `BOT_TOKEN`: Your bot token.
-     * `ADMIN_UID`: Your Telegram numeric ID.
-     * `BOT_SECRET`: Your random secret token.
-   * Click **Save and Deploy**.
+3. **Configure Settings**:
+   - In Worker **Settings**:
+     - **Bindings**: Add KV namespace binding, variable name **must be `nfd`**, select `tg-relay-kv`.
+     - **Variables and Secrets**: Add `BOT_TOKEN`, `ADMIN_UID`, `BOT_SECRET`.
+   - Save and deploy.
 
-4. **Activate Bot**:
-   * Open in your browser (with your secret token):
+4. **Activate Webhook**:
+   - Open in your browser:
      ```text
-     https://<your-worker-subdomain>.workers.dev/quick-setup?secret=YOUR_BOT_SECRET
+     https://<your-worker-domain>/quick-setup?secret=<YOUR_BOT_SECRET>
      ```
-     *(Or use your custom domain: `https://bot.yourdomain.com/quick-setup?secret=YOUR_BOT_SECRET`)*
-   * Seeing `{"ok": true, "result": true, "description": "Webhook was set"}` means you are good to go!
+   - A JSON response with `{"ok": true, "result": true, ...}` indicates success.
 
 ---
 
-### Method B: Wrangler CLI (For Developers)
+### 3. Method B: Wrangler CLI (For Developers)
 
 ```bash
-# Clone repository
-git clone https://github.com/your-username/tg-relay-shield.git
+# 1. Clone & install
+git clone https://github.com/chancat87/tg-relay-shield.git
 cd tg-relay-shield
-
-# Install dependencies
 npm install
 
-# Create KV namespace
+# 2. Create KV namespace
 npx wrangler kv:namespace create nfd
 # Copy the returned id into wrangler.toml
 
-# Set secrets
+# 3. Set secrets
 npx wrangler secret put BOT_TOKEN
 npx wrangler secret put BOT_SECRET
 npx wrangler secret put ADMIN_UID
 
-# Deploy
+# 4. Deploy
 npm run deploy
-```
 
-Then visit `https://<your-worker-domain>/quick-setup?secret=YOUR_BOT_SECRET` in your browser to activate.
+# 5. Activate
+curl "https://<your-worker-domain>/quick-setup?secret=<YOUR_BOT_SECRET>"
+```
 
 ---
 
-## 📋 Admin Commands
+## 📋 Commands & Usage Examples
 
 Execute these directly in your private chat with the bot:
 
-| Command | Usage | Description |
+| Command / Action | Example | Description |
 | :--- | :--- | :--- |
-| **Reply to message** | Tap **Reply** on a forwarded message | Sends your reply directly to the guest (text, media, files) |
-| **`/block`** | Reply to message OR `/block <uid>` | **Silent Shadowban**. Silently drops all future messages from this user |
-| **`/unblock`** | Reply to message OR `/unblock <uid>` | Unblocks the user and clears any lockout count |
+| **Reply to Guest** | Tap **Reply** on a forwarded message and type | Relays directly to guest (supports text, photo, audio, file) |
+| **`/block`** | Reply to message with `/block`<br>or `/block 12345678` | Silently shadowbans the guest |
+| **`/unblock`** | Reply to message with `/unblock`<br>or `/unblock 12345678` | Unblocks the guest and clears lockout failure count |
 | **`/addkw <word>`** | `/addkw crypto` | Adds a local keyword filter |
-| **`/delkw <word>`** | `/delkw crypto` | Deletes a local keyword filter |
-| **`/listkw`** | `/listkw` | Lists all active local keyword filters |
-| **`/help`** | `/help` | Displays the admin help menu |
-| **`/about`** | `/about` | Displays system status, version, and active defense engine |
+| **`/delkw <word>`** | `/delkw crypto` | Removes an existing keyword filter |
+| **`/listkw`** | `/listkw` | Lists all active keyword filters |
+| **`/help`** | `/help` | Displays admin instructions |
+| **`/about`** | `/about` | Displays system status and version |
+
+---
+
+## ❓ FAQ
+
+**Q: Why does the verification button spin endlessly?**  
+A: The webhook is missing `callback_query` update permission. Visit `https://<your-domain>/quick-setup?secret=<YOUR_BOT_SECRET>` to fix it automatically.
+
+**Q: Accessing `/quick-setup` returns 403?**  
+A: You must append `?secret=...` matching your configured `BOT_SECRET`.
+
+**Q: Do I need a VPS or Docker?**  
+A: No. It runs 100% serverless within Cloudflare Workers free quotas.
 
 ---
 
 ## 📄 License
 
-This project is open-source software licensed under the [MIT License](./LICENSE).
+[MIT License](./LICENSE)
